@@ -136,8 +136,8 @@
       },
       {
         "id": "agentContextTrace.readSectionBackground",
-        "description": "Neutral-gray background for lines read once in the selected session. Hover for exact counts and source-revision details.",
-        "defaults": { "light": "#0000000A", "dark": "#FFFFFF0D", "highContrast": "#FFFFFF0D", "highContrastLight": "#0000000A" }
+        "description": "Amber background for lines read once in the selected session. Indicates read frequency, not a warning. Hover for source-revision details.",
+        "defaults": { "light": "#C0800014", "dark": "#E8B35A18", "highContrast": "#E8B35A18", "highContrastLight": "#C0800014" }
       },
       {
         "id": "agentContextTrace.readSectionBorder",
@@ -161,18 +161,18 @@
       },
       {
         "id": "agentContextTrace.readSectionRepeatBackground",
-        "description": "Neutral-gray section background for 2-3 recorded reads per line in the selected session.",
-        "defaults": { "light": "#00000017", "dark": "#FFFFFF1F", "highContrast": "#FFFFFF1F", "highContrastLight": "#00000017" }
+        "description": "Amber section background for 2-3 recorded reads per line in the selected session.",
+        "defaults": { "light": "#C0800030", "dark": "#E8B35A30", "highContrast": "#E8B35A30", "highContrastLight": "#C0800030" }
       },
       {
         "id": "agentContextTrace.readSectionFrequentBackground",
-        "description": "Neutral-gray section background for 4-7 recorded reads per line in the selected session.",
-        "defaults": { "light": "#00000026", "dark": "#FFFFFF33", "highContrast": "#FFFFFF33", "highContrastLight": "#00000026" }
+        "description": "Amber section background for 4-7 recorded reads per line in the selected session.",
+        "defaults": { "light": "#C0800050", "dark": "#E8B35A50", "highContrast": "#E8B35A50", "highContrastLight": "#C0800050" }
       },
       {
         "id": "agentContextTrace.readSectionIntenseBackground",
-        "description": "Neutral-gray section background for 8 or more recorded reads per line in the selected session.",
-        "defaults": { "light": "#00000038", "dark": "#FFFFFF4D", "highContrast": "#FFFFFF4D", "highContrastLight": "#00000038" }
+        "description": "Amber section background for 8 or more recorded reads per line in the selected session.",
+        "defaults": { "light": "#C0800070", "dark": "#E8B35A78", "highContrast": "#E8B35A78", "highContrastLight": "#C0800070" }
       }
     ],
     "configuration": {
