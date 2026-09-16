@@ -39,6 +39,11 @@ export async function run(): Promise<void> {
     const sessionId = await runtime.start('Host test');
     const root = runtime.roots.find(candidate => candidate.id === source.rootId)!;
     const filePath = path.join(root.directory, source.relativePath);
+    const realUri = vscode.Uri.file(filePath);
+    const neutralUri = vscode.Uri.file(path.join(root.directory, neutral.relativePath));
+    const otherRoot = runtime.roots.find(candidate => candidate.id === other.rootId)!;
+    const invalidated: string[] = [];
+    const decorationChanges = runtime.view.onDidChangeFileDecorations(uris => invalidated.push(...uris.map(uri => uri.toString())));
     const token = new vscode.CancellationTokenSource();
     const invoke = (overrides = {}) => runtime.read({ input: { sessionId, filePath, startLine: 2, endLine: 3, ...overrides }, toolInvocationToken: undefined }, token.token);
     assert.equal(runtime.view.enabled, true);
@@ -48,7 +53,15 @@ export async function run(): Promise<void> {
     assert.equal(runtime.view.provideFileDecoration(sourceUri)?.badge, 'R');
     assert.equal(runtime.view.provideFileDecoration(runtime.view.uri(neutral)), undefined);
     assert.equal(runtime.view.provideFileDecoration(runtime.view.uri(other)), undefined, 'Multi-root identity is isolated');
-    assert.equal(runtime.view.provideFileDecoration(vscode.Uri.file(filePath)), undefined, 'Real Explorer/tab URIs are untouched');
+    assert.equal(runtime.view.provideFileDecoration(realUri)?.color?.id, 'agentContextTrace.readFileForeground', 'Explorer filename gets the read color');
+    assert.ok(invalidated.includes(realUri.toString()), 'Recording invalidates the real Explorer URI');
+    assert.equal(runtime.view.provideFileDecoration(neutralUri), undefined, 'Unrecorded Explorer file is neutral');
+    assert.equal(runtime.view.provideFileDecoration(vscode.Uri.file(path.join(otherRoot.directory, other.relativePath))), undefined, 'Same-named Explorer file in another root is neutral');
+    assert.equal(runtime.view.provideFileDecoration(vscode.Uri.file(root.directory)), undefined, 'Explorer folders are neutral');
+    assert.equal(runtime.view.provideFileDecoration(realUri.with({ scheme: 'git' })), undefined, 'Other URI schemes are untouched');
+    if (process.platform === 'win32') {
+        assert.equal(runtime.view.provideFileDecoration(vscode.Uri.file(filePath.toUpperCase()))?.badge, 'R', 'Windows path casing is ignored');
+    }
     assert.equal(runtime.view.provideFileDecoration(runtime.view.uri(roots[0]!)), undefined, 'Folders are neutral');
     await assert.rejects(invoke({ filePath: path.join(root.directory, '.env') }));
     const configuration = vscode.workspace.getConfiguration('agentContextTrace');
@@ -57,6 +70,7 @@ export async function run(): Promise<void> {
     await configuration.update('excludeGlobs', [], vscode.ConfigurationTarget.Global);
     await runtime.view.toggle();
     assert.equal(runtime.view.provideFileDecoration(sourceUri), undefined);
+    assert.equal(runtime.view.provideFileDecoration(realUri), undefined, 'Toggle hides Explorer filename color too');
     await invoke({ startLine: 1, endLine: 1 });
     assert.equal(runtime.store.get(sessionId)?.events.length, 2, 'Recording continues with colors off');
     await runtime.view.toggle();
@@ -79,9 +93,11 @@ export async function run(): Promise<void> {
     await runtime.store.setState(sessionId, 'stopped');
     const second = await runtime.start('Empty history');
     assert.equal(runtime.view.provideFileDecoration(sourceUri), undefined, 'New selected session clears old colors');
+    assert.equal(runtime.view.provideFileDecoration(realUri), undefined, 'New session clears Explorer filename color');
     await runtime.store.setState(second, 'stopped');
     await runtime.view.selectSession(sessionId);
     assert.equal(runtime.view.provideFileDecoration(sourceUri)?.badge, 'R');
+    await vscode.commands.executeCommand('revealInExplorer', neutralUri);
     await vscode.commands.executeCommand('agentContextTrace.readCoverage.focus');
     await runtime.view.tree.reveal(source, { select: false, focus: false, expand: true });
     const browser = await chromium.connectOverCDP(`http://127.0.0.1:${process.env.ACT_CDP_PORT}`);
@@ -97,6 +113,10 @@ export async function run(): Promise<void> {
             const target = Array.from(pane?.querySelectorAll('.label-name') ?? []).find(element => element.textContent === 'source.ts');
             return target && getComputedStyle(target).color === 'rgb(112, 187, 255)';
         });
+        await page.waitForFunction(() => {
+            const target = Array.from(globalThis.document.querySelectorAll('.explorer-folders-view .label-name')).find(element => element.textContent === 'source.ts');
+            return target && getComputedStyle(target).color === 'rgb(112, 187, 255)';
+        });
         const colored = await label.evaluate(element => getComputedStyle(element.querySelector('.label-name') ?? element).color);
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-colors-on.png') });
         await runtime.view.toggle();
@@ -106,9 +126,14 @@ export async function run(): Promise<void> {
             const target = Array.from(pane?.querySelectorAll('.label-name') ?? []).find(element => element.textContent === 'source.ts');
             return target && getComputedStyle(target).color !== previous;
         }, colored);
+        await page.waitForFunction(() => {
+            const target = Array.from(globalThis.document.querySelectorAll('.explorer-folders-view .label-name')).find(element => element.textContent === 'source.ts');
+            return target && getComputedStyle(target).color !== 'rgb(112, 187, 255)';
+        });
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-colors-off.png') });
         assert.equal(runtime.view.enabled, false);
     } finally { await browser.close(); }
-    console.log('PASS: registered tool, numbered read, file colors, native rendering toggle, neutral files, scope, exclusions, dirty buffers, cancellation, session selection');
+    decorationChanges.dispose();
+    console.log('PASS: registered tool, numbered read, built-in Explorer filename text colors and toggle, neutral files, multi-root scope, exclusions, dirty buffers, cancellation, session selection');
     await vscode.commands.executeCommand('workbench.action.quit');
 }

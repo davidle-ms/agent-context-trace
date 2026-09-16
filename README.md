@@ -1,6 +1,6 @@
 # Agent Context Trace
 
-A VS Code extension that colors repository files with recorded agent reads in a dedicated **Agent Read Coverage** section. Toggle the colors on or off without stopping recording.
+A VS Code extension that colors the filename text of files with recorded agent reads in the built-in **Explorer** and the **Agent Read Coverage** section. Toggle the colors on or off without stopping recording.
 
 ## Preview Status
 
@@ -25,8 +25,10 @@ Alternatively, run `npm run package` and install the resulting VSIX using **Exte
 1. Run **Agent Context Trace: Start Session** and enter a name. This copies a tool reference with the tracker session ID to your clipboard.
 2. Enable **Read File with Context Trace** in Copilot's tools picker, then paste the reference into your prompt. The tool name for APIs is `read_agent_context`; the prompt reference is `#agentContextRead`.
 3. Ask Copilot to read a specific file and range through that tool. Approve the tool confirmation as appropriate.
-4. Recorded files turn blue and gain an `R` badge in Agent Read Coverage. Folders and files with no recorded reads remain neutral.
+4. Recorded filenames turn blue and gain an `R` badge in the built-in Explorer and Agent Read Coverage. Folders and files with no recorded reads receive no decoration from this extension.
 5. Use the eye button or **Agent Context Trace: Toggle Read Colors** to hide or show markers. The preference survives restarting VS Code. Recording continues while markers are hidden.
+
+Keep VS Code's `explorer.decorations.colors` enabled to see the filename color. Customize it with the `agentContextTrace.readFileForeground` theme color. Selection styling and other providers such as Git can affect the final displayed color; turning this extension's colors off restores the remaining theme/provider styling, not necessarily plain white text. VS Code's file decorations are shared, so recorded-file decorations may also appear in editor tabs or Open Editors. Source content is never changed by coloring.
 
 Example after replacing the session ID and absolute file path:
 
@@ -59,7 +61,7 @@ Click a file to open it, or use **Show Recorded Read Details** to inspect its ra
 | `npm run check-types` | Strict TypeScript validation. |
 | `npm run compile` | Compile tests and bundle the extension. |
 | `npm run test:unit` | Seven core tests covering range semantics, path scope, metrics, persistence failures, and session attribution. |
-| `npm run test:extension` | Isolated native VS Code tests, color screenshots, session restoration, and normal-window restart tests. |
+| `npm run test:extension` | Isolated native VS Code tests, computed Explorer filename text colors and screenshots with the toggle on/off, session restoration, and normal-window restart tests. |
 | `npm run package` | Produce a self-contained VSIX without runtime npm installation. |
 
 The host test runner downloads VS Code 1.100.0 by default. To use an installed executable in PowerShell, set `$env:VSCODE_EXECUTABLE_PATH` to the full path of its executable before running the test command. Tests use temporary workspaces/profiles, and screenshots are written to the ignored `.vscode-test/screenshots` directory. Only the test windows expose local debugging endpoints; the extension does not start a server.

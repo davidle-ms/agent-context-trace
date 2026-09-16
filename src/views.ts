@@ -15,6 +15,7 @@ export class CoverageView implements vscode.TreeDataProvider<FileNode>, vscode.F
     private readonly materialized = new Map<string, FileNode>();
     private selectedId: string | undefined;
     private index = new Map<string, ReadEvent[]>();
+    private fileUris = new Map<string, vscode.Uri>();
     enabled: boolean;
 
     constructor(private readonly context: vscode.ExtensionContext, private readonly store: TraceStore, private readonly roots: readonly Root[]) {
@@ -51,6 +52,9 @@ export class CoverageView implements vscode.TreeDataProvider<FileNode>, vscode.F
         return vscode.Uri.from({ scheme: VIEW_SCHEME, authority: node.rootId, path: `/${node.relativePath}` });
     }
     private key(node: Pick<FileNode, 'rootId' | 'relativePath'>): string { return JSON.stringify([node.rootId, node.relativePath]); }
+    private fileKey(uri: vscode.Uri): string {
+        return process.platform === 'win32' ? uri.toString().toLowerCase() : uri.toString();
+    }
     private events(node: FileNode): ReadEvent[] { return this.index.get(this.key(node)) ?? []; }
     private root(node: FileNode): Root {
         const root = this.roots.find(candidate => candidate.id === node.rootId);
@@ -60,18 +64,26 @@ export class CoverageView implements vscode.TreeDataProvider<FileNode>, vscode.F
 
     refresh(): void {
         const session = this.selected();
+        const affectedFiles = new Map(this.fileUris);
+        this.fileUris.clear();
         this.index.clear();
         for (const event of session?.events ?? []) {
             const key = this.key(event);
             const events = this.index.get(key) ?? [];
             events.push(event);
             this.index.set(key, events);
+            const root = this.roots.find(candidate => candidate.id === event.rootId);
+            if (root) {
+                const uri = vscode.Uri.file(path.join(root.directory, event.relativePath));
+                this.fileUris.set(this.fileKey(uri), uri);
+                affectedFiles.set(this.fileKey(uri), uri);
+            }
         }
         this.tree.description = `${session?.label ?? 'No session selected'} | Colors ${this.enabled ? 'on' : 'off'}`;
         this.tree.message = 'Instrumented reads only';
         this.tree.badge = { value: this.index.size, tooltip: 'Files with recorded reads in the selected tracker session' };
         void vscode.commands.executeCommand('setContext', 'agentContextTrace.fileColorsEnabled', this.enabled);
-        this.decorated.fire([...this.materialized.values()].map(node => this.uri(node)));
+        this.decorated.fire([...affectedFiles.values(), ...[...this.materialized.values()].map(node => this.uri(node))]);
         this.changed.fire();
     }
 
@@ -121,9 +133,13 @@ export class CoverageView implements vscode.TreeDataProvider<FileNode>, vscode.F
     }
 
     provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
-        if (!this.enabled || uri.scheme !== VIEW_SCHEME) { return; }
-        const node = this.materialized.get(uri.toString());
-        if (!node || node.directory || !this.events(node).length) { return; }
+        if (!this.enabled) { return; }
+        if (uri.scheme === 'file') {
+            if (!this.fileUris.has(this.fileKey(uri))) { return; }
+        } else if (uri.scheme === VIEW_SCHEME) {
+            const node = this.materialized.get(uri.toString());
+            if (!node || node.directory || !this.events(node).length) { return; }
+        } else { return; }
         return { badge: 'R', tooltip: 'Recorded instrumented read in the selected session', color: new vscode.ThemeColor('agentContextTrace.readFileForeground'), propagate: false };
     }
 
