@@ -187,18 +187,39 @@ export async function run(): Promise<void> {
             { file: 'repo-new', label: 'Repository newest chat', workspace: 'repo-one', repositoryMatch: true, updatedAt: '2026-09-02T12:00:00.000Z' }
         ]);
         assert.deepEqual(pickerItems.filter(item => item.action === 'select').map(item => item.file), ['repo-new', 'repo-old', 'other-new', 'other-old']);
-        assert.deepEqual(pickerItems.filter(item => item.kind === vscode.QuickPickItemKind.Separator).map(item => item.label), ['----- THIS REPOSITORY -----', '----- OTHER SESSIONS -----', 'Open History']);
+        assert.deepEqual(pickerItems.filter(item => item.kind === vscode.QuickPickItemKind.Separator).map(item => item.label), ['This Repository', 'Other Sessions', 'Open History']);
         assert.deepEqual(historyPickerItems([]).map(item => item.action), ['separator', 'folder', 'file']);
         const choice = vscode.window.showQuickPick(pickerItems, { title: 'Choose Existing Copilot Chat Session', matchOnDetail: true });
         const picker = page.locator('.quick-input-widget');
         await picker.getByText('Repository newest chat', { exact: true }).waitFor();
-        await picker.getByText('----- THIS REPOSITORY -----', { exact: true }).waitFor();
-        await picker.getByText('----- OTHER SESSIONS -----', { exact: true }).waitFor();
+        await picker.getByText('This Repository', { exact: true }).waitFor();
+        await picker.getByText('Other Sessions', { exact: true }).waitFor();
         const displayedChats = await picker.locator('.label-name').allTextContents();
         assert.deepEqual(displayedChats.filter(text => text.endsWith('chat')), ['Repository newest chat', 'Repository older chat', 'Other newest chat', 'Other older chat']);
-        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'chat-session-groups.png') });
-        await picker.getByText('Other newest chat', { exact: true }).click();
-        assert.equal((await choice)?.file, 'other-new', 'Lower-group chat remains selectable');
+        const workbench = vscode.workspace.getConfiguration('workbench');
+        const previousColors = workbench.inspect<Record<string, unknown>>('colorCustomizations')?.globalValue;
+        try {
+            await workbench.update('colorCustomizations', { ...previousColors, 'pickerGroup.border': '#8594A6' }, vscode.ConfigurationTarget.Global);
+            await page.waitForFunction(() => {
+                const border = Array.from(globalThis.document.querySelectorAll('.quick-input-widget .quick-input-list-separator-border'))
+                    .find(element => element.textContent?.includes('Other newest chat'));
+                return border && getComputedStyle(border).borderTopColor === 'rgb(133, 148, 166)' && getComputedStyle(border).borderTopWidth !== '0px';
+            });
+            const divider = picker.locator('.quick-input-list-separator-border').filter({ hasText: 'Other newest chat' });
+            const boundary = await divider.boundingBox();
+            const lastRepositoryChat = await picker.getByText('Repository older chat', { exact: true }).boundingBox();
+            const firstOtherChat = await picker.getByText('Other newest chat', { exact: true }).boundingBox();
+            assert.ok(boundary && lastRepositoryChat && firstOtherChat);
+            assert.ok(boundary.y >= lastRepositoryChat.y + lastRepositoryChat.height && boundary.y <= firstOtherChat.y,
+                'Real border lies between the last repository chat and first other chat');
+            assert.ok(boundary.width > 500, 'Divider spans the session row, not just its heading');
+            await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'chat-session-groups.png') });
+            await picker.getByText('Other newest chat', { exact: true }).click();
+            assert.equal((await choice)?.file, 'other-new', 'Lower-group chat remains selectable');
+            console.log('PASS: full-width horizontal group border uses pickerGroup.border between the two session groups');
+        } finally {
+            await workbench.update('colorCustomizations', previousColors, vscode.ConfigurationTarget.Global);
+        }
         console.log('PASS: native chat picker groups repository sessions first and remaining sessions newest first');
     } finally { await browser.close(); }
     decorationChanges.dispose();
