@@ -44,7 +44,6 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
     private index = new Map<string, (ReadEvent | HistoryRead)[]>();
     private fileUris = new Map<string, vscode.Uri>();
     private readonly recordedSections = new Map<ReadFrequency, vscode.TextEditorDecorationType>();
-    private readonly readCountLabels: vscode.TextEditorDecorationType;
     private highlightSessionId: string | undefined;
     private editedHistoryDocuments = new WeakSet<vscode.TextDocument>();
     private readonly documentHashes = new WeakMap<vscode.TextDocument, { version: number; hash: string }>();
@@ -54,12 +53,6 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
         this.enabled = context.workspaceState.get('fileColorsEnabled', true);
         this.tree = vscode.window.createTreeView('agentContextTrace.readCoverage', { treeDataProvider: this });
         this.disposables.push(this.tree, this.changed, this.decorated, vscode.window.registerFileDecorationProvider(this));
-        this.readCountLabels = vscode.window.createTextEditorDecorationType({
-            after: { color: new vscode.ThemeColor('editor.foreground'), backgroundColor: new vscode.ThemeColor('editor.background'),
-                margin: '0 0 0 1.5em', fontStyle: 'normal' },
-            rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed
-        });
-        this.disposables.push(this.readCountLabels);
         for (const frequency of Object.keys(frequencyColors) as ReadFrequency[]) {
             const colors = frequencyColors[frequency];
             const decoration = vscode.window.createTextEditorDecorationType({
@@ -141,7 +134,7 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
         }
         this.tree.description = `${session?.label ?? 'No session selected'} | Colors ${this.enabled ? 'on' : 'off'}`;
         this.tree.message = session?.coverage === 'copilot-history-read-metadata' ? historyStatus(session) : 'Instrumented reads only';
-        if (session?.events.length) { this.tree.message += '\nBlue intensity: 1 / 2-3 / 4-7 / 8+ reads. Counts appear beside each section.'; }
+        if (session?.events.length) { this.tree.message += '\nBlue intensity: 1 / 2-3 / 4-7 / 8+ reads. Hover for exact counts.'; }
         if (session?.coverage === 'copilot-history-read-metadata' && session.events.length
             && !session.events.some(event => event.startLine !== undefined && event.endLine !== undefined)) {
             this.tree.message += '\nSection highlights unavailable: no line ranges saved.';
@@ -185,13 +178,6 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
                     ...decorate(ranges.unverified.filter(range => readFrequency(range.readCount) === frequency), false)
                 ]);
             }
-            editor.setDecorations(this.readCountLabels, [...ranges.verified, ...ranges.unverified].map(item => {
-                const firstLine = editor.document.lineAt(item.startLine - 1);
-                return {
-                    range: new vscode.Range(firstLine.range.end, firstLine.range.end),
-                    renderOptions: { after: { contentText: `Read ${item.readCount} ${item.readCount === 1 ? 'time' : 'times'}` } }
-                };
-            }));
         }
     }
 

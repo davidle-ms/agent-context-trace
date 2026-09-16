@@ -202,8 +202,6 @@ export async function run(): Promise<void> {
             .filter(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0)
             .map(element => ({ background: getComputedStyle(element).backgroundColor, border: getComputedStyle(element).borderLeftColor })));
         assert.equal(historicalMarks.length, 2);
-        await page.waitForFunction(() => Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-lines span'))
-            .filter(element => getComputedStyle(element, '::after').content === '"Read 1 time"').length === 1);
         for (const mark of historicalMarks) {
             assert.equal(mark.background, verifiedMarks[0]!.background, 'History and verified reads have identical shading');
             assert.equal(mark.border, verifiedMarks[0]!.border, 'History and verified reads have identical borders');
@@ -249,23 +247,6 @@ export async function run(): Promise<void> {
             assert.ok(frequencyMarks[index]!.alpha > frequencyMarks[index - 1]!.alpha, 'Repeated-read backgrounds have progressively stronger blue shading');
         }
         await section.getByText(/Blue intensity: 1 \/ 2-3 \/ 4-7 \/ 8\+ reads/).waitFor();
-        await page.waitForFunction(() => {
-            const labels = Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-lines span'))
-                .map(element => getComputedStyle(element, '::after').content).filter(content => /^"Read \d+ times?"$/.test(content));
-            return JSON.stringify(labels) === JSON.stringify(['"Read 1 time"', '"Read 2 times"', '"Read 4 times"', '"Read 8 times"']);
-        });
-        const labelBounds = await page.locator('.monaco-editor .view-lines span').evaluateAll(elements => elements
-            .filter(element => /^"Read \d+ times?"$/.test(getComputedStyle(element, '::after').content))
-            .map(element => ({ label: getComputedStyle(element, '::after').content,
-                line: element.closest('.view-line')?.textContent, top: element.getBoundingClientRect().top,
-                foreground: getComputedStyle(element, '::after').color, background: getComputedStyle(element, '::after').backgroundColor })));
-        assert.equal(labelBounds.length, 4);
-        assert.ok(labelBounds.every(label => label.foreground !== label.background && label.background !== 'rgba(0, 0, 0, 0)'), 'Labels have contrasting text on a neutral background');
-        assert.match(labelBounds[0]?.line ?? '', /dirty\s+first/);
-        assert.ok(labelBounds[3]?.line?.includes('fourth'));
-        assert.ok(labelBounds.every((label, index) => index === 0 || label.top > labelBounds[index - 1]!.top), 'Each section has its own label on the first line');
-        assert.equal(document.getText(), 'dirty first\nsecond\nthird\nfourth\n', 'Labels never modify source text');
-        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-frequency-labels.png') });
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-frequency-shades.png') });
         const fourthLine = page.locator('.monaco-editor .view-lines .view-line').getByText('fourth', { exact: true }).first();
         await fourthLine.hover({ position: { x: 4, y: 6 } });
@@ -274,15 +255,11 @@ export async function run(): Promise<void> {
         await section.hover();
         await runtime.view.toggle();
         assert.deepEqual(runtime.view.editorHighlights(document), { verified: [], unverified: [] });
-        await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-lines span'))
-            .some(element => /^"Read \d+ times?"$/.test(getComputedStyle(element, '::after').content)));
         await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
             .some(element => ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)'].includes(getComputedStyle(element).borderLeftColor)
                 && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
         await runtime.view.toggle();
         assert.deepEqual(runtime.view.editorHighlights(document), beforeRefresh, 'Re-enabling restores the same counts');
-        await page.waitForFunction(() => Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-lines span'))
-            .filter(element => /^"Read \d+ times?"$/.test(getComputedStyle(element, '::after').content)).length === 4);
         const missingRange = { ...frequencySession, events: [...frequencySession.events, { id: 'no-range', rootId: root.id, relativePath: 'source.ts' }] };
         runtime.view.showHistory(missingRange);
         assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /9 recorded reads/);
@@ -297,8 +274,6 @@ export async function run(): Promise<void> {
             changed.insert(sourceUri, new vscode.Position(0, 0), 'edit ');
             assert.equal(await vscode.workspace.applyEdit(changed), true);
             assert.deepEqual(runtime.view.editorHighlights(document).unverified, [], 'Editing invalidates unverified history guides');
-            await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-lines span'))
-                .some(element => /^"Read \d+ times?"$/.test(getComputedStyle(element, '::after').content)));
             await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
                 .some(element => ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)'].includes(getComputedStyle(element).borderLeftColor)
                     && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
