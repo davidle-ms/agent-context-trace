@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { minimatch } from 'minimatch';
 import { Root, ReadEvent, Session, summary, TraceStore, VIEW_SCHEME, resolveFile, hash } from './core';
+import { HistoryRead, HistorySession } from './history';
 
 export interface FileNode { rootId: string; relativePath: string; directory: boolean; name: string }
 
@@ -14,7 +15,8 @@ export class CoverageView implements vscode.TreeDataProvider<FileNode>, vscode.F
     private readonly disposables: vscode.Disposable[] = [];
     private readonly materialized = new Map<string, FileNode>();
     private selectedId: string | undefined;
-    private index = new Map<string, ReadEvent[]>();
+    private history: HistorySession | undefined;
+    private index = new Map<string, (ReadEvent | HistoryRead)[]>();
     private fileUris = new Map<string, vscode.Uri>();
     enabled: boolean;
 
@@ -34,10 +36,19 @@ export class CoverageView implements vscode.TreeDataProvider<FileNode>, vscode.F
         this.selectedId = previous && this.store.get(previous) ? previous : undefined;
         this.refresh();
     }
-    selected(): Session | undefined { return this.selectedId ? this.store.get(this.selectedId) : undefined; }
+    selected(): Session | HistorySession | undefined {
+        return this.history ? structuredClone(this.history) : this.selectedId ? this.store.get(this.selectedId) : undefined;
+    }
+    showHistory(session: HistorySession): void {
+        this.selectedId = undefined;
+        this.history = structuredClone(session);
+        this.refresh();
+    }
+    clearHistory(): void { this.history = undefined; this.refresh(); }
     async selectSession(id: string | undefined): Promise<void> {
         if (id && !this.store.get(id)) { throw new Error('Tracker session not found.'); }
         await this.context.workspaceState.update('selectedSessionId', id);
+        this.history = undefined;
         this.selectedId = id;
         this.refresh();
     }
@@ -55,7 +66,7 @@ export class CoverageView implements vscode.TreeDataProvider<FileNode>, vscode.F
     private fileKey(uri: vscode.Uri): string {
         return process.platform === 'win32' ? uri.toString().toLowerCase() : uri.toString();
     }
-    private events(node: FileNode): ReadEvent[] { return this.index.get(this.key(node)) ?? []; }
+    private events(node: FileNode): (ReadEvent | HistoryRead)[] { return this.index.get(this.key(node)) ?? []; }
     private root(node: FileNode): Root {
         const root = this.roots.find(candidate => candidate.id === node.rootId);
         if (!root) { throw new Error('Workspace root is unavailable.'); }
@@ -80,7 +91,7 @@ export class CoverageView implements vscode.TreeDataProvider<FileNode>, vscode.F
             }
         }
         this.tree.description = `${session?.label ?? 'No session selected'} | Colors ${this.enabled ? 'on' : 'off'}`;
-        this.tree.message = 'Instrumented reads only';
+        this.tree.message = session?.coverage === 'copilot-history-read-metadata' ? 'Local Copilot history (best effort)' : 'Instrumented reads only';
         this.tree.badge = { value: this.index.size, tooltip: 'Files with recorded reads in the selected tracker session' };
         void vscode.commands.executeCommand('setContext', 'agentContextTrace.fileColorsEnabled', this.enabled);
         this.decorated.fire([...affectedFiles.values(), ...[...this.materialized.values()].map(node => this.uri(node))]);
@@ -126,7 +137,8 @@ export class CoverageView implements vscode.TreeDataProvider<FileNode>, vscode.F
         const events = node.directory ? [] : this.events(node);
         item.contextValue = events.length ? 'recordedFile' : 'workspaceFile';
         const label = events.length ? `${events.length} recorded reads` : 'No recorded read in this session';
-        item.tooltip = node.directory ? node.name : `${node.name}: ${label}${events.length ? `; last ${events.at(-1)?.at}. Historical ranges, not necessarily the current revision.` : ''}`;
+        const timestamp = events.at(-1)?.at;
+        item.tooltip = node.directory ? node.name : `${node.name}: ${label}${events.length ? `${timestamp ? `; last ${timestamp}` : ''}. Historical evidence, not necessarily the current revision.` : ''}`;
         item.accessibilityInformation = { label: `${node.name}${node.directory ? ', folder' : `, ${label}`}` };
         if (!node.directory) { item.command = { command: 'agentContextTrace.openFile', title: 'Open File', arguments: [node] }; }
         return item;
@@ -140,7 +152,7 @@ export class CoverageView implements vscode.TreeDataProvider<FileNode>, vscode.F
             const node = this.materialized.get(uri.toString());
             if (!node || node.directory || !this.events(node).length) { return; }
         } else { return; }
-        return { badge: 'R', tooltip: 'Recorded instrumented read in the selected session', color: new vscode.ThemeColor('agentContextTrace.readFileForeground'), propagate: false };
+        return { badge: 'R', tooltip: this.history ? 'Read recorded in selected Copilot chat history (best effort)' : 'Recorded instrumented read in the selected session', color: new vscode.ThemeColor('agentContextTrace.readFileForeground'), propagate: false };
     }
 
     async openFile(node: FileNode): Promise<void> {
@@ -151,15 +163,20 @@ export class CoverageView implements vscode.TreeDataProvider<FileNode>, vscode.F
 
     async showDetails(node: FileNode): Promise<void> {
         const events = this.events(node);
-        const metrics = summary(events);
+        const metrics = summary(events.filter((event): event is ReadEvent => 'snapshotHash' in event));
         const selected = await vscode.window.showQuickPick(events.map(event => ({
-            label: `Lines ${event.startLine}-${event.endLine}`, description: event.at,
-            detail: `Revision ${event.snapshotHash.slice(0, 8)}${event.isDirty ? ' (unsaved buffer)' : ''}`, event
-        })), { title: `${node.name} | ${metrics.unique} revision-scoped unique lines | ${metrics.repeated} repeated` });
+            label: event.startLine !== undefined ? `Lines ${event.startLine}-${event.endLine}` : 'Recorded file read (range unavailable)', description: event.at,
+            detail: 'snapshotHash' in event ? `Revision ${event.snapshotHash.slice(0, 8)}${event.isDirty ? ' (unsaved buffer)' : ''}` : 'Copilot history; revision unavailable', event
+        })), { title: this.history ? `${node.name} | ${events.length} historical reads` : `${node.name} | ${metrics.unique} revision-scoped unique lines | ${metrics.repeated} repeated` });
         if (!selected) { return; }
         const root = this.root(node);
         const resolved = await resolveFile(path.join(root.directory, node.relativePath), this.roots);
         const document = await vscode.workspace.openTextDocument(vscode.Uri.file(resolved.filePath));
+        if (!('snapshotHash' in selected.event)) {
+            await vscode.window.showTextDocument(document);
+            void vscode.window.showInformationMessage('This chat history has no source revision. Historical lines were not highlighted.');
+            return;
+        }
         if (hash(document.getText()) !== selected.event.snapshotHash) {
             await vscode.window.showTextDocument(document);
             void vscode.window.showWarningMessage('The file has changed since this read. Historical line ranges were not highlighted.');

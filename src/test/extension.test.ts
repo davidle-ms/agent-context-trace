@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import { strict as assert } from 'node:assert';
 import * as path from 'node:path';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 import type { Runtime } from '../extension';
 import { TOOL_NAME } from '../core';
@@ -36,6 +39,41 @@ export async function run(): Promise<void> {
         console.log('PASS: session JSON restore, no auto-recording, deletion; workspace preference tested in normal development hosts');
         return;
     }
+    const historyFolder = await fs.mkdtemp(path.join(os.tmpdir(), 'act-existing-chat-'));
+    try {
+        const root = runtime.roots.find(candidate => candidate.id === source.rootId)!;
+        const sourceFile = path.join(root.directory, source.relativePath);
+        const file = path.join(historyFolder, 'existing-chat.jsonl');
+        const read = { kind: 'toolInvocationSerialized', toolId: 'copilot_readFile', toolCallId: 'history-read', isComplete: true,
+            isConfirmed: { type: 1 }, pastTenseMessage: { value: `Read [file](${pathToFileURL(sourceFile)})` } };
+        const initial = JSON.stringify({ kind: 0, v: { sessionId: 'existing-chat', customTitle: 'Existing Copilot Chat',
+            creationDate: Date.now(), requests: [{ response: [read] }] } }) + '\n';
+        await fs.writeFile(file, initial);
+        await runtime.selectCopilotFile(file);
+        assert.equal(runtime.store.list().length, 0, 'Selecting existing chat creates no tracker session');
+        assert.equal(runtime.store.current(), undefined);
+        assert.equal(runtime.view.selected()?.label, 'Existing Copilot Chat');
+        assert.equal(runtime.view.provideFileDecoration(vscode.Uri.file(sourceFile))?.badge, 'R');
+        assert.equal(runtime.view.selected()?.events[0]?.startLine, undefined, 'Missing historical range is not fabricated');
+        await runtime.view.toggle();
+        assert.equal(runtime.view.provideFileDecoration(sourceUri), undefined);
+        const updated = new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => { subscription.dispose(); reject(new Error('Selected history watcher did not refresh.')); }, 10000);
+            const subscription = runtime.view.onDidChangeTreeData(() => {
+                if (runtime.view.selected()?.events.length === 2) { clearTimeout(timeout); subscription.dispose(); resolve(); }
+            });
+        });
+        const append = JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: [{ ...read, toolCallId: 'second-read',
+            pastTenseMessage: { value: `Read [file](${pathToFileURL(path.join(root.directory, neutral.relativePath))})` } }] }) + '\n';
+        await fs.appendFile(file, append);
+        await updated;
+        assert.equal(runtime.view.enabled, false, 'History refresh does not turn colors on');
+        await runtime.view.toggle();
+        assert.equal(runtime.view.provideFileDecoration(runtime.view.uri(neutral))?.badge, 'R');
+        assert.equal(await fs.readFile(file, 'utf8'), initial + append, 'Extension never edits Copilot chat history');
+        assert.equal(runtime.store.list().length, 0);
+        console.log('PASS: existing Copilot chat selection, no tracker session, file-only history colors, selected history watcher, toggle, read-only source');
+    } finally { await fs.rm(historyFolder, { recursive: true, force: true }); }
     const sessionId = await runtime.start('Host test');
     const root = runtime.roots.find(candidate => candidate.id === source.rootId)!;
     const filePath = path.join(root.directory, source.relativePath);

@@ -5,10 +5,59 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
 import { excluded, hash, isWithin, parseSession, ReadEvent, resolveFile, sliceRead, summary, TraceStore, validateInput } from '../core';
+import { pathToFileURL } from 'node:url';
+import { extractHistory, replayHistory, readHistory, listHistory } from '../history';
 
 const input = { sessionId: randomUUID(), filePath: '/workspace/source.ts', startLine: 1, endLine: 3 };
 const event = (startLine = 1, endLine = 10): ReadEvent => ({ id: randomUUID(), rootId: hash('root'), relativePath: 'source.ts',
     startLine, endLine, requestedEndLine: endLine, snapshotHash: hash('snapshot'), isDirty: false, at: new Date().toISOString() });
+
+test('chat JSONL reconstructs snapshots, replacements, appends, and partial final writes', () => {
+    const lines = [
+        { kind: 0, v: { sessionId: 'existing', requests: [] } },
+        { kind: 2, k: ['requests'], v: [{ response: [] }] },
+        { kind: 2, k: ['requests', 0, 'response'], v: [{ kind: 'toolInvocationSerialized', isComplete: false }] },
+        { kind: 1, k: ['requests', 0, 'response', 0, 'isComplete'], v: true }
+    ].map(value => JSON.stringify(value)).join('\n');
+    const snapshot = replayHistory(`${lines}\n{"kind":`, true);
+    assert.deepEqual(snapshot.requests, [{ response: [{ kind: 'toolInvocationSerialized', isComplete: true }] }]);
+    assert.throws(() => replayHistory(`${lines}\n{"kind":\n`, true), /Invalid complete/);
+    assert.throws(() => replayHistory(`${lines}\n${JSON.stringify({ kind: 1, k: ['__proto__', 'polluted'], v: true })}`, true), /Invalid chat update path/);
+    assert.throws(() => replayHistory(`${lines}\n${JSON.stringify({ kind: 3, k: ['requests'], v: [] })}`, true), /Unsupported/);
+});
+
+test('historical reads are explicit tool evidence, never attachment/search guesses or fake revisions', () => {
+    const directory = path.resolve('fixture');
+    const root = { id: hash('history-root'), directory, name: 'fixture' };
+    const uri = pathToFileURL(path.join(directory, 'source.ts')).toString();
+    const tool = { kind: 'toolInvocationSerialized', toolId: 'copilot_readFile', toolCallId: 'read-1',
+        isConfirmed: { type: 1 }, isComplete: true, pastTenseMessage: { value: `Read [file](${uri}#L2-L5)` } };
+    const session = extractHistory({ sessionId: 'existing', customTitle: 'My Copilot Chat', creationDate: 1000, requests: [{
+        timestamp: 1000, response: [tool, tool, { ...tool, toolCallId: 'search', toolId: 'copilot_findTextInFiles' },
+            { ...tool, toolCallId: 'denied', isConfirmed: { type: 2 } }, { ...tool, toolCallId: 'pending', isComplete: false },
+            { ...tool, toolCallId: 'unknown-range', pastTenseMessage: { value: `Read [file](${uri})` } },
+            { ...tool, toolCallId: 'secret', pastTenseMessage: { value: `Read [file](${pathToFileURL(path.join(directory, '.env'))})` } }]
+    }] }, [root]);
+    assert.equal(session.label, 'My Copilot Chat');
+    assert.equal(session.coverage, 'copilot-history-read-metadata');
+    assert.equal(session.events.length, 2);
+    assert.equal(session.events[0]?.startLine, 2);
+    assert.equal(session.events[1]?.startLine, undefined);
+    assert.equal('snapshotHash' in session.events[0]!, false);
+    assert.equal(session.unmappedCalls, 1);
+});
+
+test('history listing and parsing are read-only and work without a tracker session', async () => {
+    const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'act-history-'));
+    try {
+        const file = path.join(folder, 'existing-chat.jsonl');
+        const original = JSON.stringify({ kind: 0, v: { sessionId: 'existing-chat', customTitle: 'Existing chat', requests: [] } }) + '\n';
+        await fs.writeFile(file, original);
+        assert.equal((await listHistory([folder]))[0]?.label, 'Existing chat');
+        assert.equal((await readHistory(file, [])).id, 'copilot:existing-chat');
+        assert.equal(await fs.readFile(file, 'utf8'), original);
+    } finally { await fs.rm(folder, { recursive: true, force: true }); }
+});
 
 test('ranges return numbered CRLF lines, clamp EOF, preserve final empty lines', () => {
     assert.equal(sliceRead('first\r\nsecond', input).output, '1: first\n2: second');

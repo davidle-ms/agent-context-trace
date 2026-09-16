@@ -6,7 +6,9 @@ Target: A local-first TypeScript extension for desktop VS Code and GitHub Copilo
 
 ### Implementation Checkpoint
 
-Implemented: registered read tool, local tracker sessions, bounded reads and exclusions, lazy repository tree, scoped file colors/badges, persisted color toggle, historical range navigation, and JSON export. Seven core tests and native host checks pass on Windows VS Code 1.138.0, including rendered on/off colors, independent multi-root identities, session JSON restoration, and workspace preference persistence across normal process launches.
+Implemented: existing Copilot chat picker, opt-in read-only local-history adapter, selected-file watcher, optional registered read tool and tracker sessions, lazy repository tree, file colors/badges, persisted color toggle, historical read details, and JSON export. Ten core/parser tests and native host checks pass on Windows VS Code 1.138.0, including choosing existing history without a tracker, saved-history updates, rendered on/off colors, multi-root identities, and workspace preference persistence.
+
+Session workflow clarification: Choose Copilot Chat Session is now the primary action. Existing-chat mode reads private JSON/JSONL history after consent, filters supported completed/confirmed read-tool entries to the current workspace, and never writes to Copilot history. It stores no copied source/transcript and makes no claim of complete coverage. Unavailable line ranges/revisions stay unknown. Tracker mode remains an optional stable-API fallback. This explicitly supersedes the original tracker-only scope and no-history-adapter decision below; remaining task tables primarily describe the instrumented path.
 
 Explorer clarification: recorded filename text is now colored in the built-in Explorer as well as Agent Read Coverage. Native UI tests check the computed filename text color and capture on/off screenshots. Real-file decorations are shared by VS Code and may also appear in tabs; the scope is the selected session's recorded workspace paths, not a single view.
 
@@ -24,6 +26,8 @@ Agent Context Trace will make recorded reads visible in a dedicated Agent Read C
 
 ### MVP
 
+- Choose an existing saved Copilot chat without starting a tracker; show supported historical file-read evidence and refresh as the selected history file changes.
+- Obtain opt-in before local-history access and disclose the adapter's private, version-dependent format. Original chats are read-only; unknown ranges/revisions are never fabricated.
 - Contribute a read-only language-model tool that Copilot can invoke explicitly.
 - Capture the requested range and the actual range prepared for return by that tool.
 - Associate events with an explicit, extension-owned tracker session.
@@ -38,18 +42,19 @@ Agent Context Trace will make recorded reads visible in a dedicated Agent Read C
 | Observation | MVP contract |
 |-------------|--------------|
 | This extension's read tool | Record validated calls and distinguish successful, rejected, failed, and cancelled outcomes. |
-| Built-in Copilot reads, search results, terminal commands, attachments, and other tools | Not captured. Never infer these from document-open or editor-visibility events. |
-| Copilot chat identity | Do not assume a public chat-session identifier is available to a third-party tool. Tracker sessions are user-managed. |
+| Built-in Copilot reads | Existing-chat mode recognizes supported completed/confirmed `copilot_readFile` history entries; absence of such evidence is not proof of no read. |
+| Search results, terminal commands, attachments, and other tools | Not captured. Never infer reads from document-open or editor-visibility events. |
+| Copilot chat identity | Existing-chat mode uses the ID/title in the selected local file, not a public session API. Tracker sessions remain user-managed and separate. |
 | Tool invocation token | Treat `toolInvocationToken` as opaque. Do not inspect, persist, or use it as a session key. |
 | Model consumption | A prepared tool response does not prove that the model received, retained, understood, or used its contents. |
-| Completeness | Label every view and export as instrumented-tool coverage only. Do not report a percentage of all Copilot reads. |
+| Completeness | Label provenance as instrumented-tool-only or local Copilot history (best effort). Do not report a percentage of all Copilot reads. |
 | Token cost | Do not equate lines with tokens or repeated reads with waste. Token and billing attribution are outside MVP. |
 
-The instrumented tool is a proposed MVP strategy, not a transparent observer of all existing Copilot activity. Validate whether users will adopt this workflow before investing in the full UI. If passive capture is essential, stop after the feasibility milestone and reassess the data source; do not silently substitute an editor-visibility heuristic or private-log parser.
+The instrumented tool is the optional stable-API capture path. The user's existing-chat requirement is addressed by an explicitly opt-in private-history adapter, not an editor-visibility heuristic or an undocumented API presented as supported. Validate adapter compatibility on every supported VS Code version; keep source access read-only and make partial coverage visible.
 
 ### Deferred
 
-Automatic Copilot session discovery, historical chat import, private debug-log parsing, terminal/search instrumentation, VS Code Web, remote extension hosts, team dashboards, cloud storage, automatic context optimization, and policy enforcement are not MVP deliverables.
+Cloud session discovery, additional history formats/tool types, private debug-log parsing, terminal/search instrumentation, VS Code Web, remote extension hosts, team dashboards, cloud storage, automatic context optimization, and policy enforcement remain deferred. Bounded local chat discovery and read-only historical display are implemented.
 
 ## 3. Baseline and Technology Decisions
 
@@ -58,7 +63,7 @@ At planning time, the repository contained only [README.md](../README.md), [.git
 | Area | Decision |
 |------|----------|
 | Language | TypeScript with strict checking. |
-| APIs | Stable VS Code APIs only. Verify the minimum compatible release during Phase 0, then pin `engines.vscode` and compatible `@types/vscode`. |
+| APIs | Stable VS Code extension APIs for UI/tool integration; opt-in, version-dependent on-disk chat history for existing chats. Verify both API and file-format compatibility before extending supported versions. |
 | Tool | `contributes.languageModelTools` plus `vscode.lm.registerTool`; implement `LanguageModelTool<ReadInput>`. |
 | UI | Native `TreeDataProvider`, scoped `FileDecorationProvider`, commands, `StatusBarItem`, and optional `TextEditorDecorationType`; no webview or frontend framework for MVP. File coloring is separate from editor line highlighting. |
 | Storage | Versioned JSON metadata under `ExtensionContext.storageUri`, outside the repository. This is local storage, not encrypted storage. |

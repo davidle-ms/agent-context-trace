@@ -1,10 +1,13 @@
 import * as vscode from 'vscode';
 import * as fs from 'node:fs/promises';
+import { FSWatcher, watch } from 'node:fs';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { minimatch } from 'minimatch';
 import { hash, ReadInput, Root, resolveFile, sliceRead, TOOL_NAME, TraceStore, validateInput } from './core';
 import { CoverageView, FileNode } from './views';
+import { HistorySession, listHistory, readHistory } from './history';
 
 let running: Runtime | undefined;
 
@@ -13,13 +16,17 @@ export class Runtime {
     readonly view: CoverageView;
     readonly status: vscode.StatusBarItem;
     readonly tool: vscode.LanguageModelTool<ReadInput>;
+    private historyFile: string | undefined;
+    private historyGeneration = 0;
+    private historyWatcher: FSWatcher | undefined;
+    private historyTimer: ReturnType<typeof setTimeout> | undefined;
 
     constructor(private readonly context: vscode.ExtensionContext, readonly roots: Root[], directory: string) {
         this.store = new TraceStore(directory, () => this.refresh());
         this.view = new CoverageView(context, this.store, roots);
         this.status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10);
-        this.status.command = 'agentContextTrace.selectSession';
-        this.status.tooltip = 'Instrumented-tool coverage only. Displayed history does not control recording.';
+        this.status.command = 'agentContextTrace.selectCopilotSession';
+        this.status.tooltip = 'Choose an existing Copilot chat or use optional tracker sessions. Display selection does not change recording.';
         this.tool = {
             prepareInvocation: options => {
                 const input = validateInput(options.input);
@@ -32,6 +39,7 @@ export class Runtime {
             invoke: (options, token) => this.read(options, token)
         };
         context.subscriptions.push(this.view, this.status);
+        context.subscriptions.push({ dispose: () => this.disconnectHistory() });
     }
 
     guard(): void {
@@ -51,6 +59,7 @@ export class Runtime {
                 catch (error) { void vscode.window.showErrorMessage(error instanceof Error ? error.message : 'Context Trace operation failed.'); }
             }));
         };
+        register('selectCopilotSession', () => this.chooseCopilotSession());
         register('start', async () => {
             const label = await vscode.window.showInputBox({ title: 'Start Tracker Session', prompt: 'Session name', value: 'Context trace',
                 validateInput: value => !value.trim() || value.trim().length > 80 ? 'Use 1-80 characters.' : undefined });
@@ -62,7 +71,12 @@ export class Runtime {
             const selected = await vscode.window.showQuickPick(this.store.list().map(session => ({ label: session.label,
                 description: `${session.state}${session.owner !== this.store.owner && session.state !== 'stopped' ? ' (other window or interrupted)' : ''}`,
                 detail: `${session.createdAt} | ${session.events.length} recorded reads`, id: session.id })), { title: 'Displayed Tracker Session' });
-            if (selected) { await this.view.selectSession(selected.id); }
+            if (selected) {
+                await this.context.workspaceState.update('copilotHistoryFile', undefined);
+                this.disconnectHistory();
+                await this.view.selectSession(selected.id);
+                this.refresh();
+            }
         });
         register('pauseResume', async () => {
             const current = this.store.current();
@@ -75,7 +89,7 @@ export class Runtime {
         });
         register('copyReference', () => this.copyReference());
         register('toggleFileColors', () => this.view.toggle());
-        register('refresh', () => this.view.refresh());
+        register('refresh', () => this.historyFile ? this.refreshCopilotHistory() : this.view.refresh());
         register('openFile', (node: FileNode) => this.view.openFile(node));
         register('showDetails', (node: FileNode) => this.view.showDetails(node));
         register('export', async () => {
@@ -98,6 +112,14 @@ export class Runtime {
         register('delete', async () => {
             const session = this.view.selected();
             if (!session) { return; }
+            if (session.coverage === 'copilot-history-read-metadata') {
+                await this.context.workspaceState.update('copilotHistoryFile', undefined);
+                this.disconnectHistory();
+                await this.view.selectSession(undefined);
+                this.refresh();
+                void vscode.window.showInformationMessage('Disconnected from chat history. The Copilot chat was not changed or deleted.');
+                return;
+            }
             if (await vscode.window.showWarningMessage(`Delete metadata for '${session.label}'?`, { modal: true }, 'Delete') !== 'Delete') { return; }
             await this.store.delete(session.id);
             await this.view.selectSession(undefined);
@@ -108,13 +130,130 @@ export class Runtime {
             void vscode.window.showWarningMessage('Workspace roots changed. Reload the window before using Context Trace with the new roots.');
         }));
         this.refresh();
+        const historyFile = this.context.workspaceState.get<string>('copilotHistoryFile');
+        if (historyFile && this.context.workspaceState.get('copilotHistoryConsent', false)) {
+            try { await this.selectCopilotFile(historyFile); }
+            catch { void vscode.window.showWarningMessage('Previously selected Copilot history is unavailable. Choose a chat session again.'); }
+        }
     }
 
     async start(label: string): Promise<string> {
         this.guard();
         const session = await this.store.start(label, this.roots.map(root => root.id));
+        await this.context.workspaceState.update('copilotHistoryFile', undefined);
+        this.disconnectHistory();
         await this.view.selectSession(session.id);
         return session.id;
+    }
+
+    private disconnectHistory(): void {
+        this.historyGeneration++;
+        this.historyFile = undefined;
+        this.historyWatcher?.close();
+        this.historyWatcher = undefined;
+        if (this.historyTimer) { clearTimeout(this.historyTimer); this.historyTimer = undefined; }
+    }
+
+    private async historyFolders(): Promise<string[]> {
+        const stores = new Set<string>();
+        if (this.context.storageUri) { stores.add(path.dirname(path.dirname(this.context.storageUri.fsPath))); }
+        const product = vscode.env.appName.includes('Insiders') ? 'Code - Insiders' : 'Code';
+        const base = process.platform === 'win32' ? process.env.APPDATA
+            : process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support')
+            : process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config');
+        if (base) { stores.add(path.join(base, product, 'User', 'workspaceStorage')); }
+        const folders: string[] = [];
+        for (const store of stores) {
+            const workspaces = await fs.readdir(store, { withFileTypes: true }).catch(() => []);
+            for (const workspace of workspaces.filter(entry => entry.isDirectory()).slice(0, 200)) {
+                folders.push(path.join(store, workspace.name, 'chatSessions'));
+            }
+        }
+        const custom = this.context.workspaceState.get<string>('copilotHistoryFolder');
+        if (custom) { folders.push(custom); }
+        return folders;
+    }
+
+    private async chooseCopilotSession(): Promise<void> {
+        this.guard();
+        if (!this.context.workspaceState.get('copilotHistoryConsent', false)) {
+            const approved = await vscode.window.showWarningMessage('Read local Copilot chat history? This version-dependent adapter reads chat files from this and the default VS Code profile. They can contain prompts and source content. Only file-read metadata is displayed; original chats are never modified or copied. It is not a supported Copilot API.',
+                { modal: true }, 'Read Local History');
+            if (approved !== 'Read Local History') { return; }
+            await this.context.workspaceState.update('copilotHistoryConsent', true);
+        }
+        const entries = await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Loading local Copilot chats' },
+            async () => listHistory(await this.historyFolders()));
+        const picked = await vscode.window.showQuickPick([
+            ...entries.map(entry => ({ label: entry.label, description: entry.updatedAt.slice(0, 16).replace('T', ' '),
+                detail: `Workspace ${entry.workspace} | local history (best effort)`, file: entry.file, action: 'select' })),
+            { label: 'Browse a chat history folder...', detail: 'Choose a chatSessions folder from another workspace or VS Code profile.', action: 'folder', file: '' },
+            { label: 'Open a chat JSON or JSONL file...', detail: 'Read one explicitly selected history file.', action: 'file', file: '' }
+        ], { title: 'Choose Existing Copilot Chat Session', placeHolder: entries.length ? 'Most recent 100 saved chats; only files in this repository will be colored' : 'No local chats found. Choose a history folder or file.', matchOnDetail: true });
+        if (!picked) { return; }
+        if (picked.action === 'folder') {
+            const selected = await vscode.window.showOpenDialog({ title: 'Select Copilot chatSessions Folder', canSelectFiles: false, canSelectFolders: true, canSelectMany: false });
+            if (selected?.[0]?.scheme === 'file') {
+                await this.context.workspaceState.update('copilotHistoryFolder', selected[0].fsPath);
+                await this.chooseCopilotSession();
+            }
+            return;
+        }
+        let file = picked.file;
+        if (picked.action === 'file') {
+            const selected = await vscode.window.showOpenDialog({ title: 'Select Copilot Chat History', canSelectMany: false, filters: { 'Chat history': ['json', 'jsonl'] } });
+            if (selected?.[0]?.scheme !== 'file') { return; }
+            file = selected[0].fsPath;
+        }
+        await this.selectCopilotFile(file);
+        const history = this.view.selected();
+        if (history?.coverage === 'copilot-history-read-metadata' && !history.events.length) {
+            void vscode.window.showInformationMessage('This chat has no supported read entries for this repository. Missing metadata is not evidence that the agent never read a file.');
+        }
+    }
+
+    private filterHistory(session: HistorySession): HistorySession {
+        const patterns = vscode.workspace.getConfiguration('agentContextTrace').get<string[]>('excludeGlobs', []);
+        session.events = session.events.filter(event => !patterns.some(pattern => minimatch(event.relativePath, pattern, { dot: true, nocase: process.platform === 'win32' })));
+        return session;
+    }
+
+    async selectCopilotFile(file: string): Promise<void> {
+        this.guard();
+        const generation = ++this.historyGeneration;
+        const session = this.filterHistory(await readHistory(file, this.roots));
+        if (generation !== this.historyGeneration) { return; }
+        await this.context.workspaceState.update('copilotHistoryFile', file);
+        if (generation !== this.historyGeneration) { return; }
+        this.disconnectHistory();
+        this.historyFile = file;
+        this.view.showHistory(session);
+        const schedule = () => {
+            if (this.historyTimer) { clearTimeout(this.historyTimer); }
+            this.historyTimer = setTimeout(() => {
+                this.historyTimer = undefined;
+                void this.refreshCopilotHistory().catch((error: unknown) => {
+                    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+                        this.view.clearHistory();
+                        this.view.tree.message = 'Selected chat history file is unavailable';
+                    } else { this.view.tree.message = 'History update unavailable; showing last loaded snapshot'; }
+                });
+            }, 400);
+        };
+        this.historyWatcher = watch(path.dirname(file), (_event, name) => {
+            if (!name || name.toString() === path.basename(file)) { schedule(); }
+        });
+        this.historyWatcher.on('error', () => {
+            this.view.tree.message = 'History watcher unavailable; use Refresh Repository';
+        });
+        this.refresh();
+    }
+
+    async refreshCopilotHistory(): Promise<void> {
+        if (!this.historyFile) { return; }
+        const generation = ++this.historyGeneration;
+        const session = this.filterHistory(await readHistory(this.historyFile, this.roots));
+        if (generation === this.historyGeneration) { this.view.showHistory(session); this.refresh(); }
     }
 
     private async copyReference(): Promise<void> {
@@ -127,7 +266,8 @@ export class Runtime {
     private refresh(): void {
         this.view.refresh();
         const current = this.store.current();
-        this.status.text = current ? `$(record) Trace: ${current.state} | ${current.label}` : '$(eye) Trace: off';
+        this.status.text = current ? `$(record) Trace: ${current.state} | ${current.label}`
+            : this.view.selected()?.coverage === 'copilot-history-read-metadata' ? '$(history) Trace: Copilot history' : '$(eye) Trace: choose chat';
         this.status.show();
     }
 

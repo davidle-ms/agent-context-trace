@@ -41,6 +41,11 @@
     },
     "commands": [
       {
+        "command": "agentContextTrace.selectCopilotSession",
+        "title": "Agent Context Trace: Choose Copilot Chat Session",
+        "icon": "$(history)"
+      },
+      {
         "command": "agentContextTrace.start",
         "title": "Agent Context Trace: Start Session",
         "icon": "$(play)"
@@ -56,7 +61,7 @@
       },
       {
         "command": "agentContextTrace.selectSession",
-        "title": "Agent Context Trace: Select Displayed Session",
+        "title": "Agent Context Trace: Select Tracker History",
         "icon": "$(history)"
       },
       {
@@ -79,7 +84,7 @@
       },
       {
         "command": "agentContextTrace.delete",
-        "title": "Agent Context Trace: Delete Selected Session"
+        "title": "Agent Context Trace: Delete Tracker / Disconnect Chat History"
       },
       {
         "command": "agentContextTrace.refresh",
@@ -90,12 +95,12 @@
     "menus": {
       "view/title": [
         {
-          "command": "agentContextTrace.start",
+          "command": "agentContextTrace.selectCopilotSession",
           "when": "view == agentContextTrace.readCoverage",
           "group": "navigation@1"
         },
         {
-          "command": "agentContextTrace.selectSession",
+          "command": "agentContextTrace.start",
           "when": "view == agentContextTrace.readCoverage",
           "group": "navigation@2"
         },

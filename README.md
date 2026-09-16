@@ -1,12 +1,12 @@
 # Agent Context Trace
 
-A VS Code extension that colors the filename text of files with recorded agent reads in the built-in **Explorer** and the **Agent Read Coverage** section. Toggle the colors on or off without stopping recording.
+A VS Code extension that colors filename text in the built-in **Explorer** and **Agent Read Coverage** section from a selected Copilot chat's recorded reads. Toggle the colors without stopping history refresh or optional tracker recording.
 
 ## Preview Status
 
-The first working slice includes a native repository tree, session controls, an instrumented read tool, local metadata storage, read details, and JSON export. It is an experimental developer preview, not a passive observer of all Copilot activity.
+The preview includes an existing Copilot chat picker, a read-only local-history adapter, a native repository tree, and persistent color toggle. Explicit instrumented tracker sessions remain available as an optional fallback. This is not a complete observer of all Copilot activity.
 
-**Only reads through `#agentContextRead` are recorded.** Built-in Copilot reads, search results, terminal commands, prompt attachments, and other tools are outside its coverage. A colored file means at least one range at that path was recorded in the selected tracker session, not that its entire contents or current revision were read or understood.
+**Existing chat mode** recognizes supported completed/confirmed `copilot_readFile` entries in saved VS Code chat history. It does not require starting a tracker or using `#agentContextRead`. **Tracker mode** records only reads through that contributed tool. Neither mode infers reads from file visibility, search results, terminal commands, or prompt attachments. A colored file means recorded evidence exists at that path, not that the whole file or current revision was read or understood.
 
 ## Run Locally
 
@@ -20,7 +20,22 @@ Requires Node.js 22 or later, npm, desktop VS Code, and a trusted local workspac
 
 Alternatively, run `npm run package` and install the resulting VSIX using **Extensions: Install from VSIX**. The repository is private and the preview is unlicensed; do not publish it to the Marketplace without a separate licensing and release decision.
 
-## Track a Session
+## Choose an Existing Copilot Chat
+
+1. Click the history button in Agent Read Coverage, or run **Agent Context Trace: Choose Copilot Chat Session**.
+2. On first use, approve read-only access to local history. This adapter uses private, version-dependent storage, not a supported cross-extension Copilot API.
+3. Select an existing chat by title and saved-update time. No new tracker session is created, no prompt needs changing, and the Copilot chat itself is not opened or modified.
+4. Filenames with recognized read entries turn blue in this repository. Reads pointing outside the current workspace or excluded paths are not displayed.
+5. Continue using that chat normally in Copilot. The extension watches the selected history file and refreshes when VS Code saves changes. Use **Refresh Repository** if a write notification is missed. Updates can lag the live conversation.
+6. Use **Toggle Read Colors** to show/hide markers without detaching from history. The selected history file and consent choice are remembered locally for reloads.
+
+The picker checks saved chats across workspace storage in this VS Code profile and the default profile (useful when the preview runs in a separate profile). It displays the most recent 100 eligible files and checks up to 200 workspace directories per profile. Chats from other profiles or locations can be selected using **Browse a chat history folder...** or **Open a chat JSON or JSONL file...**. Some chats have no saved title and appear with a short ID. Cloud-only, unsaved, and unsupported-format sessions might not appear.
+
+Supported input is the observed VS Code JSON snapshot or JSONL format with snapshot, replacement, and array-append records. Inputs are limited to 32 MiB and 10,000 mapped reads; other formats fail visibly rather than invent coverage. Only explicit file links in supported read-tool entries produce markers. Missing range/revision metadata is shown as unavailable; the extension does not hash today's file and claim it is the historical revision. It does not highlight unverifiable historical ranges. A chat with no supported reads leaves files neutral, which does not prove they were never read.
+
+**Delete Tracker / Disconnect Chat History** disconnects an existing chat selection without deleting the original chat. Selecting a different chat replaces the colors, rather than combining unrelated sessions.
+
+## Optional Instrumented Tracker
 
 1. Run **Agent Context Trace: Start Session** and enter a name. This copies a tool reference with the tracker session ID to your clipboard.
 2. Enable **Read File with Context Trace** in Copilot's tools picker, then paste the reference into your prompt. The tool name for APIs is `read_agent_context`; the prompt reference is `#agentContextRead`.
@@ -38,12 +53,14 @@ lines 1-20 of "<absolute workspace file path>" and summarize them.
 Do not bypass the tool's exclusions using another tool.
 ```
 
-Use **Pause / Resume Session** or **Stop Session** to control recording separately. Select historical sessions with the history button; displaying a session does not change which session is recording. Sessions from a previous process do not automatically resume. A historical session still marked recording/paused is shown as "other window or interrupted" because this preview cannot safely identify whether its owner is still running.
+Use **Pause / Resume Session** or **Stop Session** to control tracker recording separately. Use **Select Tracker History** for previously recorded tracker sessions; displaying a session does not change which tracker is recording. Sessions from a previous process do not automatically resume. A tracker still marked recording/paused is shown as "other window or interrupted" because this preview cannot safely identify whether its owner is still running.
 
 Click a file to open it, or use **Show Recorded Read Details** to inspect its ranges, timestamps, and revisions. Selecting a range highlights it only if the current document fingerprint matches; otherwise the file opens with a stale-revision warning. These are explicit navigation selections, not a continuous editor heatmap.
 
 ## Privacy and Limits
 
+- Existing-chat mode reads local files that can contain prompts and source code in memory, after opt-in. It retains only derived read metadata in memory and the consent/source-file selection in extension workspace state; it does not duplicate or modify the chat file. Explicit exports contain derived metadata only. Chat titles, paths, and timestamps remain sensitive.
+- Historical coverage is best effort and version-dependent. Completed/confirmed tool entries are evidence of recorded activity, not proof of successful model consumption. Copilot's original save/retention behavior determines which entries remain available.
 - Source is returned to Copilot when the read tool is invoked. The extension itself sends no trace telemetry to a separate service.
 - Persisted metadata includes relative paths, tracker labels, timestamps, ranges, document fingerprints, and whether a buffer was unsaved. No source text, prompts, auth tokens, or tool response bodies are saved in the trace.
 - Metadata is stored as JSON under the extension's workspace storage, outside the repository. It is not encrypted and can reveal project structure. Disk sync and backup policies still apply.
@@ -51,8 +68,8 @@ Click a file to open it, or use **Show Recorded Read Details** to inspect its ra
 - Reads are limited to local workspace text files of at most 1 MiB, up to 500 lines per request, and bounded response size/token budget. Traversal and symlink/junction escapes are rejected. The tree omits symbolic links and follows applicable `files.exclude` display rules.
 - Default read exclusions cover `.git`, dependencies, environment files, common credential locations, and private-key formats. Additional user-defined restrictions use `agentContextTrace.excludeGlobs` (workspace-relative glob patterns).
 - **Copilot content exclusions and organization policies are not inherited by this custom tool.** Review policy compatibility before enabling it on organizational code. These checks are not a security sandbox against a hostile filesystem.
-- This preview records prepared successful responses only. Denied/failed/cancelled reads do not create read markers. Persistence happens before returning the response, so a crash or cancellation at delivery can leave an event without proof of model receipt.
-- Limits are 1,000 read events per session, 100 session files, and 4 MiB per session. Old stopped sessions are pruned after 30 days when starting a new session. History deletion is limited to stopped sessions to avoid modifying a live foreign writer's data.
+- Tracker mode records prepared successful responses only. Denied/failed/cancelled reads do not create tracker markers. Persistence happens before returning the response, so a crash or cancellation at delivery can leave an event without proof of model receipt.
+- Tracker limits are 1,000 read events per session, 100 session files, and 4 MiB per session. Old stopped tracker sessions are pruned after 30 days when starting a new tracker. Only stopped tracker sessions can be deleted. Copilot's original history is never pruned or deleted by this extension.
 
 ## Development and Tests
 
@@ -60,15 +77,15 @@ Click a file to open it, or use **Show Recorded Read Details** to inspect its ra
 |---------|---------|
 | `npm run check-types` | Strict TypeScript validation. |
 | `npm run compile` | Compile tests and bundle the extension. |
-| `npm run test:unit` | Seven core tests covering range semantics, path scope, metrics, persistence failures, and session attribution. |
-| `npm run test:extension` | Isolated native VS Code tests, computed Explorer filename text colors and screenshots with the toggle on/off, session restoration, and normal-window restart tests. |
+| `npm run test:unit` | Ten tests covering chat-history replay/extraction, read-only handling, range semantics, path scope, metrics, persistence failures, and tracker attribution. |
+| `npm run test:extension` | Existing-chat selection without a tracker, saved-history watcher updates, Explorer filename colors and screenshots, toggle, session restoration, and normal-window restart tests. |
 | `npm run package` | Produce a self-contained VSIX without runtime npm installation. |
 
 The host test runner downloads VS Code 1.100.0 by default. To use an installed executable in PowerShell, set `$env:VSCODE_EXECUTABLE_PATH` to the full path of its executable before running the test command. Tests use temporary workspaces/profiles, and screenshots are written to the ignored `.vscode-test/screenshots` directory. Only the test windows expose local debugging endpoints; the extension does not start a server.
 
 VS Code intentionally uses in-memory workspace/profile storage when `--extensionTestsPath` is present. The persistence regression therefore launches two **normal** isolated development windows and operates the UI through Playwright, rather than expecting test-mode storage to survive another process. See the [VS Code storage implementation](https://github.com/microsoft/vscode/blob/main/src/vs/platform/storage/electron-main/storageMainService.ts).
 
-The tests verify host registration and invoke the read adapter directly. They do **not** constitute a signed-in, end-to-end Copilot conversation test. That remains a manual acceptance gate.
+Tests use synthetic Copilot history fixtures and direct adapter calls. The history parser was also checked read-only against local VS Code 1.138.0 chat data, producing only aggregate read counts during validation. These checks do **not** constitute a signed-in, end-to-end live Copilot conversation test; that remains a manual acceptance gate.
 
 ## Remaining Work
 
