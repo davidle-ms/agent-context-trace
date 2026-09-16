@@ -1,8 +1,16 @@
 # Agent Context Trace Implementation Plan
 
-Status: Proposed; no extension implementation exists yet.
+Status: First working read-to-color slice implemented; broader plan and acceptance gates remain in progress.
 Date: 2026-09-16
 Target: A local-first TypeScript extension for desktop VS Code and GitHub Copilot agent mode.
+
+### Implementation Checkpoint
+
+Implemented: registered read tool, local tracker sessions, bounded reads and exclusions, lazy repository tree, scoped file colors/badges, persisted color toggle, historical range navigation, and JSON export. Seven core tests and native host checks pass on Windows VS Code 1.138.0, including rendered on/off colors, independent multi-root identities, session JSON restoration, and workspace preference persistence across normal process launches.
+
+The original plan below remains the target design, not a claim that every task is complete. Current source is consolidated into core, extension, and views modules; tests use Node's test runner plus assertion-based host tests, not Mocha. Initial storage limits are 1,000 events and 4 MiB per session, with 100 retained session files. Only prepared successful reads are persisted. The toolbar currently uses one toggle command/icon; interrupted-session ownership, dynamic workspace roots, global storage budgeting, and large-tree refresh performance need further hardening. See [README.md](../README.md) for actual usage and limitations.
+
+Still unverified: a signed-in Copilot conversation using the tool, enterprise policy compatibility, the minimum supported runtime, and other operating systems. Remaining features include cross-session comparison, continuous editor decorations, rejected-call history, configurable retention, and CI/release automation. Phase 0 is therefore partially verified, not closed.
 
 ## 1. Problem and Opportunity
 
@@ -43,7 +51,7 @@ Automatic Copilot session discovery, historical chat import, private debug-log p
 
 ## 3. Baseline and Technology Decisions
 
-The repository currently contains [README.md](../README.md), [.gitignore](../.gitignore), and this plan under `docs/`. There is no existing extension code, package manifest, test harness, or CI workflow to reuse. All source and configuration paths below are proposed, not existing links.
+At planning time, the repository contained only [README.md](../README.md), [.gitignore](../.gitignore), and this plan under `docs/`. The implementation checkpoint above supersedes that baseline. The file/task tables below retain the original proposed structure for future work.
 
 | Area | Decision |
 |------|----------|
