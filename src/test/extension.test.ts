@@ -47,30 +47,39 @@ export async function run(): Promise<void> {
         const read = { kind: 'toolInvocationSerialized', toolId: 'copilot_readFile', toolCallId: 'history-read', isComplete: true,
             isConfirmed: { type: 1 }, pastTenseMessage: { value: `Read [file](${pathToFileURL(sourceFile)})` } };
         const initial = JSON.stringify({ kind: 0, v: { sessionId: 'existing-chat', customTitle: 'Existing Copilot Chat',
-            creationDate: Date.now(), requests: [{ response: [read] }] } }) + '\n';
+            creationDate: Date.now(), requests: [{ response: [] }] } }) + '\n';
+        const waitForReads = (count: number) => new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => { subscription.dispose(); reject(new Error('Selected history watcher did not refresh.')); }, 10000);
+            const subscription = runtime.view.onDidChangeTreeData(() => {
+                if (runtime.view.selected()?.events.length === count) { clearTimeout(timeout); subscription.dispose(); resolve(); }
+            });
+        });
         await fs.writeFile(file, initial);
         await runtime.selectCopilotFile(file);
         assert.equal(runtime.store.list().length, 0, 'Selecting existing chat creates no tracker session');
         assert.equal(runtime.store.current(), undefined);
         assert.equal(runtime.view.selected()?.label, 'Existing Copilot Chat');
+        assert.equal(runtime.view.provideFileDecoration(vscode.Uri.file(sourceFile)), undefined);
+        assert.match(String(runtime.view.tree.message), /no completed supported file reads saved yet/);
+        const firstRead = waitForReads(1);
+        const firstAppend = JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: [read] }) + '\n';
+        await fs.appendFile(file, firstAppend);
+        await firstRead;
+        assert.match(String(runtime.view.tree.message), /1 recorded read in this repository/);
         assert.equal(runtime.view.provideFileDecoration(vscode.Uri.file(sourceFile))?.badge, 'R');
         assert.equal(runtime.view.selected()?.events[0]?.startLine, undefined, 'Missing historical range is not fabricated');
         await runtime.view.toggle();
         assert.equal(runtime.view.provideFileDecoration(sourceUri), undefined);
-        const updated = new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => { subscription.dispose(); reject(new Error('Selected history watcher did not refresh.')); }, 10000);
-            const subscription = runtime.view.onDidChangeTreeData(() => {
-                if (runtime.view.selected()?.events.length === 2) { clearTimeout(timeout); subscription.dispose(); resolve(); }
-            });
-        });
+        const updated = waitForReads(2);
         const append = JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: [{ ...read, toolCallId: 'second-read',
             pastTenseMessage: { value: `Read [file](${pathToFileURL(path.join(root.directory, neutral.relativePath))})` } }] }) + '\n';
         await fs.appendFile(file, append);
         await updated;
+        assert.match(String(runtime.view.tree.message), /2 recorded reads in this repository/);
         assert.equal(runtime.view.enabled, false, 'History refresh does not turn colors on');
         await runtime.view.toggle();
         assert.equal(runtime.view.provideFileDecoration(runtime.view.uri(neutral))?.badge, 'R');
-        assert.equal(await fs.readFile(file, 'utf8'), initial + append, 'Extension never edits Copilot chat history');
+        assert.equal(await fs.readFile(file, 'utf8'), initial + firstAppend + append, 'Extension never edits Copilot chat history');
         assert.equal(runtime.store.list().length, 0);
         console.log('PASS: existing Copilot chat selection, no tracker session, file-only history colors, selected history watcher, toggle, read-only source');
     } finally { await fs.rm(historyFolder, { recursive: true, force: true }); }

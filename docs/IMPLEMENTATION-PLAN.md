@@ -6,7 +6,7 @@ Target: A local-first TypeScript extension for desktop VS Code and GitHub Copilo
 
 ### Implementation Checkpoint
 
-Implemented: existing Copilot chat picker, opt-in read-only local-history adapter, selected-file watcher, optional registered read tool and tracker sessions, lazy repository tree, file colors/badges, persisted color toggle, historical read details, and JSON export. Ten core/parser tests and native host checks pass on Windows VS Code 1.138.0, including choosing existing history without a tracker, saved-history updates, rendered on/off colors, multi-root identities, and workspace preference persistence.
+Implemented: existing Copilot chat picker, opt-in read-only local-history adapter, selected-file watcher, optional registered read tool and tracker sessions, lazy repository tree, file colors/badges, persisted color toggle, historical read details, and JSON export. Eleven core/parser tests and native host checks pass on Windows VS Code 1.138.0, including choosing existing history without a tracker, live zero-to-first-read status and color updates, rendered on/off colors, multi-root identities, and workspace preference persistence.
 
 Session workflow clarification: Choose Copilot Chat Session is now the primary action. Existing-chat mode reads private JSON/JSONL history after consent, filters supported completed/confirmed read-tool entries to the current workspace, and never writes to Copilot history. It stores no copied source/transcript and makes no claim of complete coverage. Unavailable line ranges/revisions stay unknown. Tracker mode remains an optional stable-API fallback. This explicitly supersedes the original tracker-only scope and no-history-adapter decision below; remaining task tables primarily describe the instrumented path.
 

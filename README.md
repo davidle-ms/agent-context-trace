@@ -29,6 +29,8 @@ Alternatively, run `npm run package` and install the resulting VSIX using **Exte
 5. Continue using that chat normally in Copilot. The extension watches the selected history file and refreshes when VS Code saves changes. Use **Refresh Repository** if a write notification is missed. Updates can lag the live conversation.
 6. Use **Toggle Read Colors** to show/hide markers without detaching from history. The selected history file and consent choice are remembered locally for reloads.
 
+The section shows a live count of reads mapped to this repository. If it is empty, its status distinguishes no completed supported reads saved yet from recorded reads that do not map to included workspace files. The status updates when history changes instead of leaving a stale one-off notification. Selection rereads the file after attaching its watcher to cover saves during initial loading.
+
 The picker checks saved chats across workspace storage in this VS Code profile and the default profile (useful when the preview runs in a separate profile). It displays the most recent 100 eligible files and checks up to 200 workspace directories per profile. Chats from other profiles or locations can be selected using **Browse a chat history folder...** or **Open a chat JSON or JSONL file...**. Some chats have no saved title and appear with a short ID. Cloud-only, unsaved, and unsupported-format sessions might not appear.
 
 Supported input is the observed VS Code JSON snapshot or JSONL format with snapshot, replacement, and array-append records. Inputs are limited to 32 MiB and 10,000 mapped reads; other formats fail visibly rather than invent coverage. Only explicit file links in supported read-tool entries produce markers. Missing range/revision metadata is shown as unavailable; the extension does not hash today's file and claim it is the historical revision. It does not highlight unverifiable historical ranges. A chat with no supported reads leaves files neutral, which does not prove they were never read.
@@ -77,7 +79,7 @@ Click a file to open it, or use **Show Recorded Read Details** to inspect its ra
 |---------|---------|
 | `npm run check-types` | Strict TypeScript validation. |
 | `npm run compile` | Compile tests and bundle the extension. |
-| `npm run test:unit` | Ten tests covering chat-history replay/extraction, read-only handling, range semantics, path scope, metrics, persistence failures, and tracker attribution. |
+| `npm run test:unit` | Eleven tests covering chat-history replay/extraction, live empty-state/read-count feedback, read-only handling, range semantics, path scope, metrics, persistence failures, and tracker attribution. |
 | `npm run test:extension` | Existing-chat selection without a tracker, saved-history watcher updates, Explorer filename colors and screenshots, toggle, session restoration, and normal-window restart tests. |
 | `npm run package` | Produce a self-contained VSIX without runtime npm installation. |
 

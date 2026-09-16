@@ -29,6 +29,17 @@ export interface HistorySession {
 }
 export interface HistoryEntry { file: string; label: string; updatedAt: string; workspace: string }
 
+export function historyStatus(session: HistorySession): string {
+    const count = session.events.length;
+    if (count) {
+        return `Local Copilot history: ${count} recorded read${count === 1 ? '' : 's'} in this repository (best effort)`;
+    }
+    if (session.recognizedCalls) {
+        return `Local Copilot history: ${session.recognizedCalls} read entries found, but none map to included files in this repository. Check the open folder, read metadata, and exclusions.`;
+    }
+    return 'Local Copilot history: no completed supported file reads saved yet. Continue the chat or select another session; colors update when history is saved.';
+}
+
 export function replayHistory(text: string, jsonl: boolean): JsonObject {
     if (Buffer.byteLength(text) > MAX_HISTORY_BYTES) { throw new Error('Chat history exceeds the 32 MiB preview limit.'); }
     if (!jsonl) {

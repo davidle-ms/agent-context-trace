@@ -206,10 +206,6 @@ export class Runtime {
             file = selected[0].fsPath;
         }
         await this.selectCopilotFile(file);
-        const history = this.view.selected();
-        if (history?.coverage === 'copilot-history-read-metadata' && !history.events.length) {
-            void vscode.window.showInformationMessage('This chat has no supported read entries for this repository. Missing metadata is not evidence that the agent never read a file.');
-        }
     }
 
     private filterHistory(session: HistorySession): HistorySession {
@@ -247,6 +243,7 @@ export class Runtime {
             this.view.tree.message = 'History watcher unavailable; use Refresh Repository';
         });
         this.refresh();
+        await this.refreshCopilotHistory();
     }
 
     async refreshCopilotHistory(): Promise<void> {

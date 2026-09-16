@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { test } from 'node:test';
 import { excluded, hash, isWithin, parseSession, ReadEvent, resolveFile, sliceRead, summary, TraceStore, validateInput } from '../core';
 import { pathToFileURL } from 'node:url';
-import { extractHistory, replayHistory, readHistory, listHistory } from '../history';
+import { extractHistory, replayHistory, readHistory, listHistory, historyStatus } from '../history';
 
 const input = { sessionId: randomUUID(), filePath: '/workspace/source.ts', startLine: 1, endLine: 3 };
 const event = (startLine = 1, endLine = 10): ReadEvent => ({ id: randomUUID(), rootId: hash('root'), relativePath: 'source.ts',
@@ -141,4 +141,15 @@ test('failed persistence never updates in-memory read history; corrupt metadata 
         await assert.rejects(store.record(session.id, 0, event(), () => false));
         assert.equal(store.get(session.id)?.events.length, 0);
     } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test('chat status distinguishes unsaved read evidence from unmapped entries and updates to a live count', () => {
+    const session = extractHistory({ sessionId: 'status-test', requests: [] }, []);
+    assert.match(historyStatus(session), /no completed supported file reads saved yet/);
+    session.recognizedCalls = 2;
+    assert.match(historyStatus(session), /2 read entries found, but none map/);
+    session.events = [{ id: 'read-1', rootId: hash('root'), relativePath: 'source.ts' }];
+    assert.match(historyStatus(session), /1 recorded read in this repository/);
+    session.events.push({ id: 'read-2', rootId: hash('root'), relativePath: 'other.ts' });
+    assert.match(historyStatus(session), /2 recorded reads in this repository/);
 });

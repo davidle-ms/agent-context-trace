@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { minimatch } from 'minimatch';
 import { Root, ReadEvent, Session, summary, TraceStore, VIEW_SCHEME, resolveFile, hash } from './core';
-import { HistoryRead, HistorySession } from './history';
+import { HistoryRead, HistorySession, historyStatus } from './history';
 
 export interface FileNode { rootId: string; relativePath: string; directory: boolean; name: string }
 
@@ -91,7 +91,7 @@ export class CoverageView implements vscode.TreeDataProvider<FileNode>, vscode.F
             }
         }
         this.tree.description = `${session?.label ?? 'No session selected'} | Colors ${this.enabled ? 'on' : 'off'}`;
-        this.tree.message = session?.coverage === 'copilot-history-read-metadata' ? 'Local Copilot history (best effort)' : 'Instrumented reads only';
+        this.tree.message = session?.coverage === 'copilot-history-read-metadata' ? historyStatus(session) : 'Instrumented reads only';
         this.tree.badge = { value: this.index.size, tooltip: 'Files with recorded reads in the selected tracker session' };
         void vscode.commands.executeCommand('setContext', 'agentContextTrace.fileColorsEnabled', this.enabled);
         this.decorated.fire([...affectedFiles.values(), ...[...this.materialized.values()].map(node => this.uri(node))]);
