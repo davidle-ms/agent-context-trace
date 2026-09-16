@@ -27,7 +27,7 @@ Alternatively, run `npm run package` and install the resulting VSIX using **Exte
 3. Select an existing chat under **This Repository** at the top, or **Other Sessions** underneath. Each group is sorted by most recently saved first, with timestamps displayed in local time. No new tracker session is created, no prompt needs changing, and the Copilot chat itself is not opened or modified.
 4. Filenames with recognized read entries turn blue in this repository. Reads pointing outside the current workspace or excluded paths are not displayed.
 5. Continue using that chat normally in Copilot. The extension watches the selected history file and refreshes when VS Code saves changes. Use **Refresh Repository** if a write notification is missed. Updates can lag the live conversation.
-6. Use **Toggle Read Colors** to show/hide markers without detaching from history. The selected history file and consent choice are remembered locally for reloads.
+6. Use the visible **Toggle Read Colors** checkbox beneath the status message to show/hide markers without detaching from history. Its **On/Off** label shows the current state. The selected history file and consent choice are remembered locally for reloads.
 
 The section shows a live count of reads mapped to this repository. If it is empty, its status distinguishes no completed supported reads saved yet from recorded reads that do not map to included workspace files. The status updates when history changes instead of leaving a stale one-off notification. Selection rereads the file after attaching its watcher to cover saves during initial loading.
 
@@ -47,7 +47,7 @@ Supported input is the observed VS Code JSON snapshot or JSONL format with snaps
 2. Enable **Read File with Context Trace** in Copilot's tools picker, then paste the reference into your prompt. The tool name for APIs is `read_agent_context`; the prompt reference is `#agentContextRead`.
 3. Ask Copilot to read a specific file and range through that tool. Approve the tool confirmation as appropriate.
 4. Recorded filenames turn blue and gain an `R` badge in the built-in Explorer. Folders and files with no recorded reads receive no decoration from this extension; Agent Read Coverage does not list files.
-5. Use the eye button or **Agent Context Trace: Toggle Read Colors** to hide or show markers. The preference survives restarting VS Code. Recording continues while markers are hidden.
+5. Click the **Toggle Read Colors** checkbox or its text in Agent Read Coverage to hide or show markers. You can also focus the checkbox and press **Space**, or run **Agent Context Trace: Toggle Read Colors** from the Command Palette. The preference survives restarting VS Code. Recording continues while markers are hidden.
 
 Keep VS Code's `explorer.decorations.colors` enabled to see the filename color. Customize it with the `agentContextTrace.readFileForeground` theme color. Selection styling and other providers such as Git can affect the final displayed color; turning this extension's colors off restores the remaining theme/provider styling, not necessarily plain white text. VS Code's file decorations are shared, so recorded-file decorations may also appear in editor tabs or Open Editors. Source content is never changed by coloring.
 
@@ -84,7 +84,7 @@ Browse and open files in the normal Explorer. Right-click a file there and choos
 | `npm run check-types` | Strict TypeScript validation. |
 | `npm run compile` | Compile tests and bundle the extension. |
 | `npm run test:unit` | Thirteen tests covering saved workspace association, per-group recent-first ordering/limits, chat-history replay/extraction, live read-count feedback, read-only handling, range semantics, path scope, metrics, persistence failures, and tracker attribution. |
-| `npm run test:extension` | No duplicate file/folder rows in coverage, Explorer read-details command, native chat picker sections and ordering, existing-chat refresh, Explorer colors/screenshots, toggle, session restoration, and normal-window restart tests. |
+| `npm run test:extension` | One labeled toggle control and no duplicate file/folder rows, checkbox/text/keyboard interaction, Explorer read details, chat picker grouping, history refresh, color screenshots, and restart persistence. |
 | `npm run package` | Produce a self-contained VSIX without runtime npm installation. |
 
 The host test runner downloads VS Code 1.100.0 by default. To use an installed executable in PowerShell, set `$env:VSCODE_EXECUTABLE_PATH` to the full path of its executable before running the test command. Tests use temporary workspaces/profiles, and screenshots are written to the ignored `.vscode-test/screenshots` directory. Only the test windows expose local debugging endpoints; the extension does not start a server.
@@ -95,4 +95,4 @@ Tests use synthetic Copilot history fixtures and direct adapter calls. The histo
 
 ## Remaining Work
 
-The [implementation plan](docs/IMPLEMENTATION-PLAN.md) describes the larger target. Remaining work includes authenticated Copilot acceptance and policy review, minimum-version and cross-platform checks, cross-session analytics, continuous editor highlights, rejected-call history, robust interrupted-session cleanup, a global disk budget, large-repository performance testing, and CI/release automation. The initial view uses a single toggle icon; separate state-specific menu labels are also planned.
+The [implementation plan](docs/IMPLEMENTATION-PLAN.md) describes the larger target. Remaining work includes authenticated Copilot acceptance and policy review, minimum-version and cross-platform checks, cross-session analytics, continuous editor highlights, rejected-call history, robust interrupted-session cleanup, a global disk budget, large-repository performance testing, and CI/release automation.

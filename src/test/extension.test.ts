@@ -23,7 +23,10 @@ export async function run(): Promise<void> {
     const sourceUri = vscode.Uri.file(filePath);
     const neutralUri = vscode.Uri.file(path.join(root.directory, 'neutral.ts'));
     const otherUri = vscode.Uri.file(path.join(otherRoot.directory, 'source.ts'));
-    assert.deepEqual(runtime.view.getChildren(), [], 'Coverage controls never enumerate workspace directories');
+    assert.deepEqual(runtime.view.getChildren(), ['toggle'], 'Coverage contains one labeled control, not workspace directories');
+    assert.deepEqual(runtime.view.getChildren('toggle'), [], 'Toggle does not contain child entries');
+    assert.equal(runtime.view.getTreeItem().label, 'Toggle Read Colors');
+    assert.equal(runtime.view.getTreeItem().checkboxState, vscode.TreeItemCheckboxState.Checked);
     if (process.env.ACT_TEST_PHASE === 'restore') {
         const previous = runtime.store.list().find(session => session.label === 'Host test');
         assert.ok(previous, 'Session JSON restored independently of test-mode workspace state');
@@ -77,7 +80,7 @@ export async function run(): Promise<void> {
         assert.equal(runtime.view.enabled, false, 'History refresh does not turn colors on');
         await runtime.view.toggle();
         assert.equal(runtime.view.provideFileDecoration(neutralUri)?.badge, 'R');
-        assert.deepEqual(runtime.view.getChildren(), [], 'Historical reads never create duplicate file entries');
+        assert.deepEqual(runtime.view.getChildren(), ['toggle'], 'Historical reads never create duplicate file entries');
         assert.equal(await fs.readFile(file, 'utf8'), initial + firstAppend + append, 'Extension never edits Copilot chat history');
         assert.equal(runtime.store.list().length, 0);
         console.log('PASS: existing Copilot chat selection, no tracker session, file-only history colors, selected history watcher, toggle, read-only source');
@@ -149,8 +152,13 @@ export async function run(): Promise<void> {
         await section.waitFor({ state: 'visible' });
         await page.waitForFunction(() => {
             const pane = Array.from(globalThis.document.querySelectorAll('.pane')).find(element => element.textContent?.includes('Agent Read Coverage'));
-            return pane && pane.querySelectorAll('.monaco-list-row').length === 0;
+            return pane && pane.querySelectorAll('.monaco-list-row').length === 1;
         });
+        const toggleLabel = section.getByText('Toggle Read Colors', { exact: true });
+        const toggleCheckbox = section.getByRole('checkbox');
+        await toggleLabel.waitFor({ state: 'visible' });
+        assert.equal(await toggleCheckbox.getAttribute('aria-checked'), 'true');
+        assert.equal(runtime.view.getTreeItem().description, 'On');
         assert.equal(await section.getByText('repo-one', { exact: true }).count(), 0, 'No duplicate repository root');
         assert.equal(await section.getByText('source.ts', { exact: true }).count(), 0, 'No duplicate file listing');
         await page.waitForFunction(() => {
@@ -158,13 +166,31 @@ export async function run(): Promise<void> {
             return target && getComputedStyle(target).color === 'rgb(112, 187, 255)';
         });
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-colors-on.png') });
-        await vscode.commands.executeCommand('agentContextTrace.toggleFileColors');
+        const beforeToggle = JSON.stringify(runtime.view.selected());
+        await toggleCheckbox.click();
         await page.waitForFunction(() => {
             const target = Array.from(globalThis.document.querySelectorAll('.explorer-folders-view .label-name')).find(element => element.textContent === 'source.ts');
             return target && getComputedStyle(target).color !== 'rgb(112, 187, 255)';
         });
+        await section.getByText('Off', { exact: true }).waitFor();
+        assert.equal(await toggleCheckbox.getAttribute('aria-checked'), 'false');
+        assert.equal(runtime.view.getTreeItem().description, 'Off');
+        assert.equal(JSON.stringify(runtime.view.selected()), beforeToggle, 'Visible checkbox changes only color visibility');
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-colors-off.png') });
         assert.equal(runtime.view.enabled, false);
+        await toggleLabel.click();
+        await section.getByText('On', { exact: true }).waitFor();
+        await page.waitForFunction(() => {
+            const target = Array.from(globalThis.document.querySelectorAll('.explorer-folders-view .label-name')).find(element => element.textContent === 'source.ts');
+            return target && getComputedStyle(target).color === 'rgb(112, 187, 255)';
+        });
+        assert.equal(await toggleCheckbox.getAttribute('aria-checked'), 'true', 'Clicking toggle text updates the checkbox');
+        await toggleCheckbox.focus();
+        await page.keyboard.press('Space');
+        await section.getByText('Off', { exact: true }).waitFor();
+        assert.equal(await toggleCheckbox.getAttribute('aria-checked'), 'false', 'Keyboard toggles the visible control');
+        assert.equal(runtime.view.enabled, false);
+        assert.ok(!extension.packageJSON.contributes.menus['view/title'].some((item: { command: string }) => item.command === 'agentContextTrace.toggleFileColors'), 'Toggle is not hidden among header icons');
         const details = vscode.commands.executeCommand('agentContextTrace.showDetails', sourceUri);
         const detailPicker = page.locator('.quick-input-widget');
         await detailPicker.getByText('Lines 2-3', { exact: true }).waitFor();

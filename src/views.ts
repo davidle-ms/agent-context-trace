@@ -25,12 +25,12 @@ export function historyPickerItems(entries: readonly HistoryEntry[]): HistoryPic
     return items;
 }
 
-export class CoverageView implements vscode.TreeDataProvider<never>, vscode.FileDecorationProvider, vscode.Disposable {
+export class CoverageView implements vscode.TreeDataProvider<'toggle'>, vscode.FileDecorationProvider, vscode.Disposable {
     private readonly changed = new vscode.EventEmitter<void>();
     private readonly decorated = new vscode.EventEmitter<vscode.Uri[]>();
     readonly onDidChangeTreeData = this.changed.event;
     readonly onDidChangeFileDecorations = this.decorated.event;
-    readonly tree: vscode.TreeView<never>;
+    readonly tree: vscode.TreeView<'toggle'>;
     private readonly disposables: vscode.Disposable[] = [];
     private selectedId: string | undefined;
     private history: HistorySession | undefined;
@@ -40,8 +40,17 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
 
     constructor(private readonly context: vscode.ExtensionContext, private readonly store: TraceStore, private readonly roots: readonly Root[]) {
         this.enabled = context.workspaceState.get('fileColorsEnabled', true);
-        this.tree = vscode.window.createTreeView('agentContextTrace.readCoverage', { treeDataProvider: this });
+        this.tree = vscode.window.createTreeView('agentContextTrace.readCoverage', { treeDataProvider: this, manageCheckboxStateManually: true });
         this.disposables.push(this.tree, this.changed, this.decorated, vscode.window.registerFileDecorationProvider(this));
+        this.disposables.push(this.tree.onDidChangeCheckboxState(async event => {
+            const state = event.items.find(([item]) => item === 'toggle')?.[1];
+            if (state === undefined) { return; }
+            try { await this.setColorsEnabled(state === vscode.TreeItemCheckboxState.Checked); }
+            catch {
+                this.refresh();
+                void vscode.window.showErrorMessage('Could not save the read-color preference. Please try again.');
+            }
+        }));
     }
 
     restoreSelection(): void {
@@ -66,7 +75,10 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
         this.refresh();
     }
     async toggle(): Promise<void> {
-        const enabled = !this.enabled;
+        await this.setColorsEnabled(!this.enabled);
+    }
+
+    private async setColorsEnabled(enabled: boolean): Promise<void> {
         await this.context.workspaceState.update('fileColorsEnabled', enabled);
         this.enabled = enabled;
         this.refresh();
@@ -101,9 +113,18 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
         this.changed.fire();
     }
 
-    getChildren(): never[] { return []; }
+    getChildren(element?: 'toggle'): 'toggle'[] { return element ? [] : ['toggle']; }
 
-    getTreeItem(): vscode.TreeItem { throw new Error('Agent Read Coverage contains controls and status only.'); }
+    getTreeItem(): vscode.TreeItem {
+        const item = new vscode.TreeItem('Toggle Read Colors', vscode.TreeItemCollapsibleState.None);
+        item.id = 'toggle-read-colors';
+        item.description = this.enabled ? 'On' : 'Off';
+        item.checkboxState = this.enabled ? vscode.TreeItemCheckboxState.Checked : vscode.TreeItemCheckboxState.Unchecked;
+        item.tooltip = 'Show or hide recorded-read colors in Explorer. History refresh and recording continue.';
+        item.accessibilityInformation = { label: `Toggle Read Colors, ${this.enabled ? 'On' : 'Off'}` };
+        item.command = { command: 'agentContextTrace.toggleFileColors', title: 'Toggle Read Colors' };
+        return item;
+    }
 
     provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
         if (!this.enabled || uri.scheme !== 'file' || !this.fileUris.has(this.fileKey(uri))) { return; }

@@ -105,11 +105,6 @@
           "group": "navigation@2"
         },
         {
-          "command": "agentContextTrace.toggleFileColors",
-          "when": "view == agentContextTrace.readCoverage",
-          "group": "navigation@3"
-        },
-        {
           "command": "agentContextTrace.refresh",
           "when": "view == agentContextTrace.readCoverage",
           "group": "navigation@4"
