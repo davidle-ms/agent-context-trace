@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 import type { Runtime } from '../extension';
 import { TOOL_NAME } from '../core';
+import type { HistorySession } from '../history';
 import { historyPickerItems } from '../views';
 
 export async function run(): Promise<void> {
@@ -33,7 +34,8 @@ export async function run(): Promise<void> {
         assert.equal(runtime.store.current(), undefined, 'Historical session not automatically recording');
         assert.equal(runtime.view.provideFileDecoration(sourceUri)?.badge, 'R');
         const restoredDocument = await vscode.workspace.openTextDocument(sourceUri);
-        assert.deepEqual(runtime.view.editorHighlights(restoredDocument).verified, [{ startLine: 1, endLine: 1 }], 'Only the matching saved revision is highlighted after reload');
+        assert.deepEqual(runtime.view.editorHighlights(restoredDocument).verified, [{ startLine: 1, endLine: 1, readCount: 1 }], 'Only the matching saved revision is highlighted after reload');
+        assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /3 recorded reads/, 'File total restored without inflating per-line counts across revisions');
         const selected = runtime.view.selected()!;
         await runtime.store.delete(selected.id);
         assert.equal(runtime.view.provideFileDecoration(sourceUri), undefined, 'Deletion removes markers');
@@ -96,7 +98,7 @@ export async function run(): Promise<void> {
     const result = await invoke();
     assert.ok((result.content[0] as vscode.LanguageModelTextPart).value.endsWith('2: second\n3: third'));
     const readDocument = await vscode.workspace.openTextDocument(sourceUri);
-    assert.deepEqual(runtime.view.editorHighlights(readDocument), { verified: [{ startLine: 2, endLine: 3 }], unverified: [] });
+    assert.deepEqual(runtime.view.editorHighlights(readDocument), { verified: [{ startLine: 2, endLine: 3, readCount: 1 }], unverified: [] });
     assert.deepEqual(runtime.view.editorHighlights(await vscode.workspace.openTextDocument(otherUri)), { verified: [], unverified: [] }, 'Highlights are isolated by workspace root');
     assert.equal(runtime.view.provideFileDecoration(sourceUri)?.badge, 'R');
     assert.equal(runtime.view.provideFileDecoration(neutralUri), undefined);
@@ -124,7 +126,8 @@ export async function run(): Promise<void> {
     assert.equal(runtime.store.get(sessionId)?.events.length, 2, 'Recording continues with colors off');
     await runtime.view.toggle();
     assert.equal(runtime.view.provideFileDecoration(sourceUri)?.badge, 'R');
-    assert.deepEqual(runtime.view.editorHighlights(readDocument).verified, [{ startLine: 1, endLine: 3 }], 'Adjacent same-revision reads merge into a single section');
+    assert.deepEqual(runtime.view.editorHighlights(readDocument).verified, [{ startLine: 1, endLine: 3, readCount: 1 }], 'Adjacent equal-frequency reads merge into a single section');
+    assert.equal(runtime.view.provideFileDecoration(sourceUri)?.color?.id, 'agentContextTrace.readFileRepeatForeground');
     const document = await vscode.workspace.openTextDocument(filePath);
     const edit = new vscode.WorkspaceEdit();
     edit.insert(document.uri, new vscode.Position(0, 0), 'dirty ');
@@ -133,7 +136,7 @@ export async function run(): Promise<void> {
     await invoke({ startLine: 1, endLine: 1 });
     assert.equal(runtime.store.get(sessionId)?.events.at(-1)?.isDirty, true);
     await document.save();
-    assert.deepEqual(runtime.view.editorHighlights(document).verified, [{ startLine: 1, endLine: 1 }], 'Read against dirty buffer matches saved unchanged text');
+    assert.deepEqual(runtime.view.editorHighlights(document).verified, [{ startLine: 1, endLine: 1, readCount: 1 }], 'Read against dirty buffer matches saved unchanged text');
     token.cancel();
     await assert.rejects(invoke());
     token.dispose();
@@ -167,7 +170,7 @@ export async function run(): Promise<void> {
         assert.equal(await section.getByText('source.ts', { exact: true }).count(), 0, 'No duplicate file listing');
         await page.waitForFunction(() => {
             const target = Array.from(globalThis.document.querySelectorAll('.explorer-folders-view .label-name')).find(element => element.textContent === 'source.ts');
-            return target && getComputedStyle(target).color === 'rgb(112, 187, 255)';
+            return target && getComputedStyle(target).color === 'rgb(92, 168, 240)';
         });
         await page.waitForFunction(() => Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
             .some(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
@@ -183,16 +186,16 @@ export async function run(): Promise<void> {
         await vscode.commands.executeCommand('agentContextTrace.toggleFileColors');
         await page.waitForFunction(() => {
             const target = Array.from(globalThis.document.querySelectorAll('.explorer-folders-view .label-name')).find(element => element.textContent === 'source.ts');
-            return target && getComputedStyle(target).color !== 'rgb(112, 187, 255)';
+            return target && getComputedStyle(target).color !== 'rgb(92, 168, 240)';
         });
         await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
-            .some(element => ['rgb(112, 187, 255)', 'rgb(232, 179, 90)'].includes(getComputedStyle(element).borderLeftColor) && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
+            .some(element => ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)'].includes(getComputedStyle(element).borderLeftColor) && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-colors-off.png') });
         assert.equal(runtime.view.enabled, false);
         await runtime.view.toggle();
         runtime.view.showHistory({ id: 'copilot:range-preview', label: 'Historical ranges', createdAt: '', coverage: 'copilot-history-read-metadata',
             recognizedCalls: 1, unmappedCalls: 0, events: [{ id: 'history-range', rootId: root.id, relativePath: 'source.ts', startLine: 2, endLine: 3 }] });
-        assert.deepEqual(runtime.view.editorHighlights(document), { verified: [], unverified: [{ startLine: 2, endLine: 3 }] });
+        assert.deepEqual(runtime.view.editorHighlights(document), { verified: [], unverified: [{ startLine: 2, endLine: 3, readCount: 1 }] });
         await page.waitForFunction(() => Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
             .filter(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0).length === 2);
         const historicalMarks = await page.locator('.monaco-editor .view-overlays .cdr').evaluateAll(elements => elements
@@ -204,8 +207,64 @@ export async function run(): Promise<void> {
             assert.equal(mark.border, verifiedMarks[0]!.border, 'History and verified reads have identical borders');
         }
         assert.doesNotMatch(String(runtime.view.tree.message), /amber/i);
-        await section.getByText('Local Copilot history: 1 recorded read in this repository (best effort)', { exact: true }).waitFor();
+        await section.getByText(/Local Copilot history: 1 recorded read in this repository/).waitFor();
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-sections-history.png') });
+        const frequencySession: HistorySession = {
+            id: 'copilot:frequency-preview', label: 'Session read frequency', createdAt: '', coverage: 'copilot-history-read-metadata',
+            recognizedCalls: 8, unmappedCalls: 0, events: [1, 2, 3, 3, 4, 4, 4, 4].map((startLine, index) => ({
+                id: `frequency-${index}`, rootId: root.id, relativePath: 'source.ts', startLine, endLine: 4
+            }))
+        };
+        for (const [count, suffix] of [[1, ''], [2, 'Repeat'], [4, 'Frequent'], [8, 'Intense']] as const) {
+            runtime.view.showHistory({ ...frequencySession, events: frequencySession.events.slice(0, count) });
+            assert.equal(runtime.view.provideFileDecoration(sourceUri)?.color?.id, `agentContextTrace.readFile${suffix}Foreground`);
+            assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, new RegExp(`${count} recorded read`));
+        }
+        assert.deepEqual(runtime.view.editorHighlights(document).unverified, [
+            { startLine: 1, endLine: 1, readCount: 1 }, { startLine: 2, endLine: 2, readCount: 2 },
+            { startLine: 3, endLine: 3, readCount: 4 }, { startLine: 4, endLine: 4, readCount: 8 }
+        ]);
+        const beforeRefresh = runtime.view.editorHighlights(document);
+        runtime.view.refresh();
+        runtime.view.showHistory({ ...frequencySession, events: [...frequencySession.events, frequencySession.events[0]!] });
+        assert.deepEqual(runtime.view.editorHighlights(document), beforeRefresh, 'Refreshes and repeated event IDs do not inflate read frequency');
+        assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /8 recorded reads/);
+        runtime.view.showHistory(frequencySession);
+        await page.waitForFunction(() => {
+            const colors = new Set(Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
+                .filter(element => parseFloat(getComputedStyle(element).borderLeftWidth) > 0).map(element => getComputedStyle(element).borderLeftColor));
+            return ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)'].every(color => colors.has(color));
+        });
+        const frequencyMarks = await page.locator('.monaco-editor .view-overlays .cdr').evaluateAll(elements => elements
+            .filter(element => ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)'].includes(getComputedStyle(element).borderLeftColor)
+                && parseFloat(getComputedStyle(element).borderLeftWidth) > 0)
+            .map(element => ({ lineTop: (element.parentElement as HTMLElement).offsetTop, color: getComputedStyle(element).borderLeftColor,
+                alpha: Number(getComputedStyle(element).backgroundColor.match(/[\d.]+/g)?.[3]) })).sort((left, right) => left.lineTop - right.lineTop));
+        assert.equal(frequencyMarks.length, 4, 'Exactly four recorded lines have frequency highlights');
+        assert.deepEqual(frequencyMarks.map(mark => mark.color), ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)']);
+        for (let index = 1; index < frequencyMarks.length; index++) {
+            assert.ok(frequencyMarks[index]!.lineTop > frequencyMarks[index - 1]!.lineTop);
+            assert.ok(frequencyMarks[index]!.alpha > frequencyMarks[index - 1]!.alpha, 'Repeated-read backgrounds have progressively stronger blue shading');
+        }
+        await section.getByText(/Blue intensity: 1 \/ 2-3 \/ 4-7 \/ 8\+ reads/).waitFor();
+        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-frequency-shades.png') });
+        const fourthLine = page.locator('.monaco-editor .view-lines .view-line').getByText('fourth', { exact: true }).first();
+        await fourthLine.hover({ position: { x: 4, y: 6 } });
+        await page.getByText(/Lines 4-4: 8 recorded reads in this session/).waitFor();
+        await page.keyboard.press('Escape');
+        await section.hover();
+        await runtime.view.toggle();
+        assert.deepEqual(runtime.view.editorHighlights(document), { verified: [], unverified: [] });
+        await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
+            .some(element => ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)'].includes(getComputedStyle(element).borderLeftColor)
+                && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
+        await runtime.view.toggle();
+        assert.deepEqual(runtime.view.editorHighlights(document), beforeRefresh, 'Re-enabling restores the same counts');
+        const missingRange = { ...frequencySession, events: [...frequencySession.events, { id: 'no-range', rootId: root.id, relativePath: 'source.ts' }] };
+        runtime.view.showHistory(missingRange);
+        assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /9 recorded reads/);
+        assert.deepEqual(runtime.view.editorHighlights(document), beforeRefresh, 'File-only reads affect the file total but no section counts');
+        console.log('PASS: four blue frequency tiers, per-line overlaps, per-file counts, exact-count hover, refresh deduplication, and toggling');
         const priorUnverified = configuration.inspect<boolean>('showUnverifiedHistoryRanges')?.globalValue;
         try {
             await configuration.update('showUnverifiedHistoryRanges', false, vscode.ConfigurationTarget.Global);
@@ -216,7 +275,8 @@ export async function run(): Promise<void> {
             assert.equal(await vscode.workspace.applyEdit(changed), true);
             assert.deepEqual(runtime.view.editorHighlights(document).unverified, [], 'Editing invalidates unverified history guides');
             await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
-                .some(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
+                .some(element => ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)'].includes(getComputedStyle(element).borderLeftColor)
+                    && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
             const undoEdit = new vscode.WorkspaceEdit();
             undoEdit.delete(sourceUri, new vscode.Range(0, 0, 0, 5));
             await vscode.workspace.applyEdit(undoEdit);
@@ -224,7 +284,7 @@ export async function run(): Promise<void> {
             assert.deepEqual(runtime.view.editorHighlights(document).unverified, [], 'History guides do not silently reappear after observed edits');
         } finally { await configuration.update('showUnverifiedHistoryRanges', priorUnverified, vscode.ConfigurationTarget.Global); }
         await runtime.view.selectSession(sessionId);
-        assert.deepEqual(runtime.view.editorHighlights(document).verified, [{ startLine: 1, endLine: 1 }]);
+        assert.deepEqual(runtime.view.editorHighlights(document).verified, [{ startLine: 1, endLine: 1, readCount: 1 }], 'Switching sessions restores its own count, not the previously selected history totals');
         const split = await vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Beside, preview: false });
         assert.notEqual(split, sourceEditor);
         await page.waitForFunction(() => Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
@@ -232,7 +292,7 @@ export async function run(): Promise<void> {
         await runtime.view.toggle();
         await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
             .some(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
-        console.log('PASS: one color for verified and historical read sections, missing ranges, file edits, split editors, session changes, and eye toggle');
+        console.log('PASS: same blue frequency scale for tracker and historical reads, missing ranges, file edits, split editors, session changes, and eye toggle');
         const details = vscode.commands.executeCommand('agentContextTrace.showDetails', sourceUri);
         const detailPicker = page.locator('.quick-input-widget');
         await detailPicker.getByText('Lines 2-3', { exact: true }).waitFor();

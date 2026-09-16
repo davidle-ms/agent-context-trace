@@ -1,6 +1,6 @@
 # Agent Context Trace
 
-A VS Code extension that colors filenames in the built-in **Explorer** and highlights recorded line sections inside open editors. **Agent Read Coverage** contains session controls and status only, with no duplicate file tree. The eye toggle controls both surfaces without stopping history refresh or optional tracker recording.
+A VS Code extension that shades filenames in the built-in **Explorer** and recorded sections inside open editors by how often they were read in the selected session. More recorded reads produce a stronger blue shade. **Agent Read Coverage** contains session controls and status only, with no duplicate file tree. The eye toggle controls both surfaces without stopping history refresh or optional tracker recording.
 
 ## Preview Status
 
@@ -43,18 +43,25 @@ Supported input is the observed VS Code JSON snapshot or JSONL format with snaps
 
 ## Highlighted File Sections
 
-Open a file in the normal editor after selecting a chat or tracker session. All recorded ranges use the same blue whole-line shading, left border, and overview-ruler marker. Hover over a section for its range and source-version information. The existing eye toggle shows or hides both filename colors and section highlights.
+Open a file in the normal editor after selecting a chat or tracker session. Recorded ranges use blue whole-line shading, a left border, and an overview-ruler marker, with intensity based on read frequency. Hover over a section for its exact count, range, and source-version information. The existing eye toggle shows or hides both filename colors and section highlights.
 
 | Highlight | Meaning |
 |-----------|---------|
-| Blue | Recorded read range, from either tracker metadata or saved Copilot chat history. The color itself does not imply that the current contents match the historical file. |
+| Light blue | 1 recorded read. |
+| Medium blue | 2-3 recorded reads. |
+| Strong blue | 4-7 recorded reads. |
+| Strongest blue | 8 or more recorded reads. The exact count remains in the tooltip. |
 | No shading | Line numbers are absent/invalid, the file is too large, the recorded revision does not match, or highlighting is disabled. Filename colors may still be present. |
+
+The scale is fixed, not relative to the most-read file. Both tracker and saved-chat evidence use the same blue shades at the same counts. On dark themes stronger background opacity makes frequently read sections more prominent; on light themes they appear deeper blue. A short scale legend is shown in Agent Read Coverage. The shade does not imply model understanding, task quality, or that a historical range matches today's contents.
+
+Editor counts are **per line**: reads of lines 1-10 and 5-15 shade lines 5-10 more strongly (two reads) and leave the rest at one read. Adjacent spans merge only when they have the same count and evidence type. Explorer filename counts are **distinct recorded calls to that file** across the selected session, including calls with missing line numbers and earlier revisions. Such calls do not add to current-line counts. Repeated event IDs, view refreshes, and toggling do not inflate counts; choosing another session replaces them. Persisted history remains unchanged.
 
 For saved-chat ranges without a source revision, the tooltip says **"Historical range; file may have changed."** Tracker ranges with a matching fingerprint identify that match in the tooltip. Missing line numbers never produce a section highlight.
 
-Adjacent/overlapping ranges of the same evidence type are merged; unrelated lines are not shaded. Out-of-bounds ranges are skipped, not silently reassigned to other lines. Editing a document clears stale verified highlights; they can return when the content again matches the recorded fingerprint. Historical guides are suppressed for dirty buffers and after edits observed while that session is selected. Switching away and back to a history session resets this observation guard, but its guides remain explicitly unverified.
+Unrelated lines are not shaded. Out-of-bounds ranges are skipped, not silently reassigned to other lines. Editor counts include only reads whose snapshot matches the current document, or allowed history guides with unknown revisions; different known revisions are not added together at today's line positions. Editing a document clears stale verified highlights; they can return when the content again matches the recorded fingerprint. Historical guides are suppressed for dirty buffers and after edits observed while that session is selected. Switching away and back to a history session resets this observation guard, but its guides remain explicitly unverified.
 
-Disable `agentContextTrace.showUnverifiedHistoryRanges` to show only revision-verified sections. The default is `true` so saved-chat ranges can be inspected with the historical-version tooltip. All sections share the `agentContextTrace.readSectionBackground` and `agentContextTrace.readSectionBorder` theme colors; the former separate historical color IDs are no longer used.
+Disable `agentContextTrace.showUnverifiedHistoryRanges` to show only revision-verified sections. The default is `true` so saved-chat ranges can be inspected with the historical-version tooltip. Theme IDs for one-read sections remain `agentContextTrace.readSectionBackground` and `agentContextTrace.readSectionBorder`. Higher-frequency backgrounds use `agentContextTrace.readSectionRepeatBackground`, `agentContextTrace.readSectionFrequentBackground`, and `agentContextTrace.readSectionIntenseBackground`. Their borders, ruler markers, and Explorer filename shades use `agentContextTrace.readFileRepeatForeground`, `agentContextTrace.readFileFrequentForeground`, and `agentContextTrace.readFileIntenseForeground` respectively.
 
 Only visible local editors with matching recorded paths are processed, including split panes. Document fingerprints are cached by document version in memory, are not persisted for history guides, and are bounded to 1 MiB. Opening files or updating decorations never generates agent-read events or modifies source. The absence of section highlights is not proof that the agent did not read that section.
 
@@ -66,7 +73,7 @@ Only visible local editors with matching recorded paths are processed, including
 4. Recorded filenames turn blue and gain an `R` badge in the built-in Explorer. Folders and files with no recorded reads receive no decoration from this extension; Agent Read Coverage does not list files.
 5. Use the eye button or **Agent Context Trace: Toggle Read Colors** to hide or show markers. The preference survives restarting VS Code. Recording continues while markers are hidden.
 
-Keep VS Code's `explorer.decorations.colors` enabled to see the filename color. Customize it with the `agentContextTrace.readFileForeground` theme color. Selection styling and other providers such as Git can affect the final displayed color; turning this extension's colors off restores the remaining theme/provider styling, not necessarily plain white text. VS Code's file decorations are shared, so recorded-file decorations may also appear in editor tabs or Open Editors. Source content is never changed by coloring.
+Keep VS Code's `explorer.decorations.colors` enabled to see filename shades. The base `agentContextTrace.readFileForeground` theme color applies to files read once; the higher-frequency theme IDs are listed above. Selection styling and other providers such as Git can affect the final displayed color; turning this extension's colors off restores the remaining theme/provider styling, not necessarily plain white text. VS Code's file decorations are shared, so recorded-file decorations may also appear in editor tabs or Open Editors. Source content is never changed by coloring.
 
 Example after replacing the session ID and absolute file path:
 
@@ -100,8 +107,8 @@ Browse and open files in the normal Explorer. Right-click a file there and choos
 |---------|---------|
 | `npm run check-types` | Strict TypeScript validation. |
 | `npm run compile` | Compile tests and bundle the extension. |
-| `npm run test:unit` | Fifteen tests covering historical line-range formats, highlight merging/revision checks, workspace association, chat replay/extraction, read-only handling, range semantics, path scope, metrics, persistence, and attribution. |
-| `npm run test:extension` | Actual editor section rendering and position, identical blue shading/borders for tracker and historical reads, history opt-out, stale-edit clearing, split editors, shared eye toggle, missing ranges, Explorer colors, grouped picker, history refresh, and restart persistence. |
+| `npm run test:unit` | Sixteen tests covering per-line frequency, inclusive overlaps, tier boundaries, deduplication, large intervals, revision checks, historical line-range formats, workspace association, chat replay/extraction, read-only handling, path scope, persistence, and attribution. |
+| `npm run test:extension` | Four progressively stronger blue tiers, exact-count tooltip, filename totals vs per-line overlaps, refresh deduplication, session isolation, edit invalidation, split editors, shared toggle, grouped picker, history refresh, and restart persistence. |
 | `npm run package` | Produce a self-contained VSIX without runtime npm installation. |
 
 The host test runner downloads VS Code 1.100.0 by default. To use an installed executable in PowerShell, set `$env:VSCODE_EXECUTABLE_PATH` to the full path of its executable before running the test command. Tests use temporary workspaces/profiles, and screenshots are written to the ignored `.vscode-test/screenshots` directory. Only the test windows expose local debugging endpoints; the extension does not start a server.

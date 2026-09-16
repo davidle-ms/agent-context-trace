@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
-import { excluded, hash, isWithin, parseSession, ReadEvent, resolveFile, sliceRead, summary, TraceStore, validateInput, readHighlightRanges } from '../core';
+import { excluded, hash, isWithin, parseSession, ReadEvent, resolveFile, sliceRead, summary, TraceStore, validateInput, readHighlightRanges, readFrequency } from '../core';
 import { pathToFileURL } from 'node:url';
 import { extractHistory, replayHistory, readHistory, listHistory, historyStatus, groupHistory, HistoryEntry } from '../history';
 
@@ -240,8 +240,24 @@ test('editor highlights merge known ranges and distinguish missing or stale sour
     ];
     const before = structuredClone(events);
     assert.deepEqual(readHighlightRanges(events, 'current', 10, true), {
-        verified: [{ startLine: 2, endLine: 6 }, { startLine: 8, endLine: 8 }], unverified: [{ startLine: 9, endLine: 10 }]
+        verified: [{ startLine: 2, endLine: 3, readCount: 1 }, { startLine: 4, endLine: 4, readCount: 2 },
+            { startLine: 5, endLine: 6, readCount: 1 }, { startLine: 8, endLine: 8, readCount: 1 }],
+        unverified: [{ startLine: 9, endLine: 10, readCount: 1 }]
     });
     assert.deepEqual(readHighlightRanges(events, 'changed', 10, false), { verified: [], unverified: [] });
     assert.deepEqual(events, before);
+});
+
+test('frequency ranges count distinct reads at inclusive overlaps and merge only equal counts', () => {
+    const first = { id: 'first', startLine: 1, endLine: 10 };
+    const events = [first, { id: 'second', startLine: 5, endLine: 15 }, first, { id: 'third', startLine: 16, endLine: 20 },
+        { id: 'missing' }, { id: 'stale', startLine: 1, endLine: 20, snapshotHash: 'old' }];
+    assert.deepEqual(readHighlightRanges(events, 'current', 20, true), { verified: [], unverified: [
+        { startLine: 1, endLine: 4, readCount: 1 }, { startLine: 5, endLine: 10, readCount: 2 }, { startLine: 11, endLine: 20, readCount: 1 }
+    ] });
+    const repeated = Array.from({ length: 10 }, (_, index) => ({ id: `read-${index}`, startLine: 2, endLine: 2, snapshotHash: 'current' }));
+    assert.deepEqual(readHighlightRanges(repeated, 'current', 2, false).verified, [{ startLine: 2, endLine: 2, readCount: 10 }]);
+    assert.deepEqual(readHighlightRanges([{ startLine: 1, endLine: 1000000000 }], 'current', 1000000000, true).unverified,
+        [{ startLine: 1, endLine: 1000000000, readCount: 1 }], 'Large spans use interval boundaries, not per-line arrays');
+    assert.deepEqual([1, 2, 3, 4, 7, 8, 100].map(readFrequency), ['single', 'repeat', 'repeat', 'frequent', 'frequent', 'intense', 'intense']);
 });

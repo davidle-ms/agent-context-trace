@@ -1,7 +1,14 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import { Root, ReadEvent, Session, summary, TraceStore, resolveFile, hash, MAX_FILE_BYTES, readHighlightRanges, ReadRange } from './core';
+import { Root, ReadEvent, Session, summary, TraceStore, resolveFile, hash, MAX_FILE_BYTES, readHighlightRanges, ReadRange, readFrequency, ReadFrequency } from './core';
 import { HistoryRead, HistorySession, historyStatus, HistoryEntry, groupHistory } from './history';
+
+const frequencyColors = {
+    single: { background: 'readSectionBackground', border: 'readSectionBorder', filename: 'readFileForeground' },
+    repeat: { background: 'readSectionRepeatBackground', border: 'readFileRepeatForeground', filename: 'readFileRepeatForeground' },
+    frequent: { background: 'readSectionFrequentBackground', border: 'readFileFrequentForeground', filename: 'readFileFrequentForeground' },
+    intense: { background: 'readSectionIntenseBackground', border: 'readFileIntenseForeground', filename: 'readFileIntenseForeground' }
+} satisfies Record<ReadFrequency, { background: string; border: string; filename: string }>;
 
 export interface HistoryPickerItem extends vscode.QuickPickItem {
     file: string;
@@ -36,7 +43,7 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
     private history: HistorySession | undefined;
     private index = new Map<string, (ReadEvent | HistoryRead)[]>();
     private fileUris = new Map<string, vscode.Uri>();
-    private readonly recordedSections: vscode.TextEditorDecorationType;
+    private readonly recordedSections = new Map<ReadFrequency, vscode.TextEditorDecorationType>();
     private highlightSessionId: string | undefined;
     private editedHistoryDocuments = new WeakSet<vscode.TextDocument>();
     private readonly documentHashes = new WeakMap<vscode.TextDocument, { version: number; hash: string }>();
@@ -46,16 +53,21 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
         this.enabled = context.workspaceState.get('fileColorsEnabled', true);
         this.tree = vscode.window.createTreeView('agentContextTrace.readCoverage', { treeDataProvider: this });
         this.disposables.push(this.tree, this.changed, this.decorated, vscode.window.registerFileDecorationProvider(this));
-        this.recordedSections = vscode.window.createTextEditorDecorationType({
-            isWholeLine: true,
-            backgroundColor: new vscode.ThemeColor('agentContextTrace.readSectionBackground'),
-            borderColor: new vscode.ThemeColor('agentContextTrace.readSectionBorder'),
-            borderStyle: 'solid', borderWidth: '0 0 0 2px',
-            overviewRulerColor: new vscode.ThemeColor('agentContextTrace.readSectionBorder'),
-            overviewRulerLane: vscode.OverviewRulerLane.Right,
-            rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed
-        });
-        this.disposables.push(this.recordedSections,
+        for (const frequency of Object.keys(frequencyColors) as ReadFrequency[]) {
+            const colors = frequencyColors[frequency];
+            const decoration = vscode.window.createTextEditorDecorationType({
+                isWholeLine: true,
+                backgroundColor: new vscode.ThemeColor(`agentContextTrace.${colors.background}`),
+                borderColor: new vscode.ThemeColor(`agentContextTrace.${colors.border}`),
+                borderStyle: 'solid', borderWidth: '0 0 0 2px',
+                overviewRulerColor: new vscode.ThemeColor(`agentContextTrace.${colors.border}`),
+                overviewRulerLane: vscode.OverviewRulerLane.Right,
+                rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed
+            });
+            this.recordedSections.set(frequency, decoration);
+            this.disposables.push(decoration);
+        }
+        this.disposables.push(
             vscode.window.onDidChangeVisibleTextEditors(() => this.refreshEditorHighlights()),
             vscode.workspace.onDidChangeTextDocument(event => {
                 if (!event.contentChanges.length) { return; }
@@ -122,6 +134,7 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
         }
         this.tree.description = `${session?.label ?? 'No session selected'} | Colors ${this.enabled ? 'on' : 'off'}`;
         this.tree.message = session?.coverage === 'copilot-history-read-metadata' ? historyStatus(session) : 'Instrumented reads only';
+        if (session?.events.length) { this.tree.message += '\nBlue intensity: 1 / 2-3 / 4-7 / 8+ reads. Hover for exact counts.'; }
         if (session?.coverage === 'copilot-history-read-metadata' && session.events.length
             && !session.events.some(event => event.startLine !== undefined && event.endLine !== undefined)) {
             this.tree.message += '\nSection highlights unavailable: no line ranges saved.';
@@ -156,10 +169,15 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
             const ranges = this.editorHighlights(editor.document);
             const decorate = (items: ReadRange[], verified: boolean): vscode.DecorationOptions[] => items.map(item => ({
                 range: new vscode.Range(item.startLine - 1, 0, item.endLine - 1, editor.document.lineAt(item.endLine - 1).text.length),
-                hoverMessage: verified ? `Recorded read: lines ${item.startLine}-${item.endLine}. Source revision matches this document.`
-                    : `Recorded read: lines ${item.startLine}-${item.endLine}. Historical range; file may have changed. Copilot saved no source revision.`
+                hoverMessage: `Lines ${item.startLine}-${item.endLine}: ${item.readCount} recorded read${item.readCount === 1 ? '' : 's'} in this session. `
+                    + (verified ? 'Source revision matches this document.' : 'Historical range; file may have changed. Copilot saved no source revision.')
             }));
-            editor.setDecorations(this.recordedSections, [...decorate(ranges.verified, true), ...decorate(ranges.unverified, false)]);
+            for (const [frequency, decoration] of this.recordedSections) {
+                editor.setDecorations(decoration, [
+                    ...decorate(ranges.verified.filter(range => readFrequency(range.readCount) === frequency), true),
+                    ...decorate(ranges.unverified.filter(range => readFrequency(range.readCount) === frequency), false)
+                ]);
+            }
         }
     }
 
@@ -169,7 +187,10 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
 
     provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
         if (!this.enabled || uri.scheme !== 'file' || !this.fileUris.has(this.fileKey(uri))) { return; }
-        return { badge: 'R', tooltip: this.history ? 'Read recorded in selected Copilot chat history (best effort)' : 'Recorded instrumented read in the selected session', color: new vscode.ThemeColor('agentContextTrace.readFileForeground'), propagate: false };
+        const count = new Set(this.index.get(this.fileKey(uri))?.map(event => event.id)).size;
+        return { badge: 'R', tooltip: `${count} recorded read${count === 1 ? '' : 's'} in the selected session. `
+            + (this.history ? 'Copilot history (best effort).' : 'Instrumented reads.'),
+            color: new vscode.ThemeColor(`agentContextTrace.${frequencyColors[readFrequency(count)].filename}`), propagate: false };
     }
 
     async showDetails(uri?: vscode.Uri): Promise<void> {

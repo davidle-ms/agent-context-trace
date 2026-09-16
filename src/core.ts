@@ -39,29 +39,50 @@ export function hash(text: string): string {
     return createHash('sha256').update(text).digest('hex');
 }
 
-export interface ReadRange { startLine: number; endLine: number }
-export interface HighlightEvidence { startLine?: number; endLine?: number; snapshotHash?: string }
+export interface ReadRange { startLine: number; endLine: number; readCount: number }
+export interface HighlightEvidence { id?: string; startLine?: number; endLine?: number; snapshotHash?: string }
+export type ReadFrequency = 'single' | 'repeat' | 'frequent' | 'intense';
+
+export function readFrequency(readCount: number): ReadFrequency {
+    return readCount >= 8 ? 'intense' : readCount >= 4 ? 'frequent' : readCount >= 2 ? 'repeat' : 'single';
+}
 
 export function readHighlightRanges(events: readonly HighlightEvidence[], snapshotHash: string, lineCount: number, allowUnverified: boolean): { verified: ReadRange[]; unverified: ReadRange[] } {
     const verified: ReadRange[] = [];
     const unverified: ReadRange[] = [];
+    const seen = new Set<string>();
     for (const event of events) {
         const { startLine, endLine } = event;
         if (startLine === undefined || endLine === undefined || !Number.isSafeInteger(startLine) || !Number.isSafeInteger(endLine)
-            || startLine < 1 || endLine < startLine || endLine > lineCount) { continue; }
-        if (event.snapshotHash === snapshotHash) { verified.push({ startLine, endLine }); }
-        else if (event.snapshotHash === undefined && allowUnverified) { unverified.push({ startLine, endLine }); }
+            || startLine < 1 || endLine < startLine || endLine > lineCount || endLine === Number.MAX_SAFE_INTEGER) { continue; }
+        if (event.id !== undefined) {
+            if (seen.has(event.id)) { continue; }
+            seen.add(event.id);
+        }
+        if (event.snapshotHash === snapshotHash) { verified.push({ startLine, endLine, readCount: 1 }); }
+        else if (event.snapshotHash === undefined && allowUnverified) { unverified.push({ startLine, endLine, readCount: 1 }); }
     }
-    const merge = (ranges: ReadRange[]): ReadRange[] => {
+    const countRanges = (ranges: ReadRange[]): ReadRange[] => {
+        const boundaries = new Map<number, number>();
+        for (const range of ranges) {
+            boundaries.set(range.startLine, (boundaries.get(range.startLine) ?? 0) + 1);
+            boundaries.set(range.endLine + 1, (boundaries.get(range.endLine + 1) ?? 0) - 1);
+        }
         const merged: ReadRange[] = [];
-        for (const range of ranges.sort((left, right) => left.startLine - right.startLine)) {
-            const previous = merged.at(-1);
-            if (previous && range.startLine <= previous.endLine + 1) { previous.endLine = Math.max(previous.endLine, range.endLine); }
-            else { merged.push({ ...range }); }
+        let previousLine = 0;
+        let readCount = 0;
+        for (const [line, delta] of [...boundaries].sort(([left], [right]) => left - right)) {
+            if (readCount > 0 && line > previousLine) {
+                const previous = merged.at(-1);
+                if (previous && previous.endLine + 1 === previousLine && previous.readCount === readCount) { previous.endLine = line - 1; }
+                else { merged.push({ startLine: previousLine, endLine: line - 1, readCount }); }
+            }
+            readCount += delta;
+            previousLine = line;
         }
         return merged;
     };
-    return { verified: merge(verified), unverified: merge(unverified) };
+    return { verified: countRanges(verified), unverified: countRanges(unverified) };
 }
 
 export function isWithin(root: string, candidate: string): boolean {

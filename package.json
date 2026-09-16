@@ -126,7 +126,7 @@
     "colors": [
       {
         "id": "agentContextTrace.readFileForeground",
-        "description": "File with a recorded instrumented read in the displayed tracker session.",
+        "description": "Filename with one recorded read in the selected session.",
         "defaults": {
           "light": "#165B9C",
           "dark": "#70BBFF",
@@ -136,13 +136,43 @@
       },
       {
         "id": "agentContextTrace.readSectionBackground",
-        "description": "Background for all recorded read sections. Hover for source-revision details.",
+        "description": "Background for lines read once in the selected session. Hover for exact counts and source-revision details.",
         "defaults": { "light": "#165B9C18", "dark": "#70BBFF22", "highContrast": "#70BBFF22", "highContrastLight": "#003D8018" }
       },
       {
         "id": "agentContextTrace.readSectionBorder",
-        "description": "Border and ruler marker for all recorded read sections.",
+        "description": "Border and ruler marker for lines read once in the selected session.",
         "defaults": { "light": "#165B9C", "dark": "#70BBFF", "highContrast": "#FFFFFF", "highContrastLight": "#003D80" }
+      },
+      {
+        "id": "agentContextTrace.readFileRepeatForeground",
+        "description": "Filename and section border for 2-3 recorded reads in the selected session.",
+        "defaults": { "light": "#124E89", "dark": "#5CA8F0", "highContrast": "#9ACFFF", "highContrastLight": "#00356F" }
+      },
+      {
+        "id": "agentContextTrace.readFileFrequentForeground",
+        "description": "Filename and section border for 4-7 recorded reads in the selected session.",
+        "defaults": { "light": "#104275", "dark": "#4C95DF", "highContrast": "#70BBFF", "highContrastLight": "#002C60" }
+      },
+      {
+        "id": "agentContextTrace.readFileIntenseForeground",
+        "description": "Filename and section border for 8 or more recorded reads in the selected session.",
+        "defaults": { "light": "#0A3561", "dark": "#418AD7", "highContrast": "#5CA8F0", "highContrastLight": "#00234F" }
+      },
+      {
+        "id": "agentContextTrace.readSectionRepeatBackground",
+        "description": "Section background for 2-3 recorded reads per line in the selected session.",
+        "defaults": { "light": "#165B9C30", "dark": "#70BBFF3D", "highContrast": "#70BBFF3D", "highContrastLight": "#003D8030" }
+      },
+      {
+        "id": "agentContextTrace.readSectionFrequentBackground",
+        "description": "Section background for 4-7 recorded reads per line in the selected session.",
+        "defaults": { "light": "#165B9C48", "dark": "#70BBFF60", "highContrast": "#70BBFF60", "highContrastLight": "#003D8048" }
+      },
+      {
+        "id": "agentContextTrace.readSectionIntenseBackground",
+        "description": "Section background for 8 or more recorded reads per line in the selected session.",
+        "defaults": { "light": "#165B9C66", "dark": "#70BBFF85", "highContrast": "#70BBFF85", "highContrastLight": "#003D8066" }
       }
     ],
     "configuration": {
