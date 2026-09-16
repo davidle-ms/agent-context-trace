@@ -136,23 +136,13 @@
       },
       {
         "id": "agentContextTrace.readSectionBackground",
-        "description": "Background for read sections whose source revision matches the editor.",
+        "description": "Background for all recorded read sections. Hover for source-revision details.",
         "defaults": { "light": "#165B9C18", "dark": "#70BBFF22", "highContrast": "#70BBFF22", "highContrastLight": "#003D8018" }
       },
       {
         "id": "agentContextTrace.readSectionBorder",
-        "description": "Border and ruler marker for verified read sections.",
+        "description": "Border and ruler marker for all recorded read sections.",
         "defaults": { "light": "#165B9C", "dark": "#70BBFF", "highContrast": "#FFFFFF", "highContrastLight": "#003D80" }
-      },
-      {
-        "id": "agentContextTrace.unverifiedSectionBackground",
-        "description": "Background for historical read ranges with no source revision; current contents are unverified.",
-        "defaults": { "light": "#8A5C0018", "dark": "#E8B35A22", "highContrast": "#E8B35A22", "highContrastLight": "#8A5C0018" }
-      },
-      {
-        "id": "agentContextTrace.unverifiedSectionBorder",
-        "description": "Border and ruler marker for unverified historical ranges.",
-        "defaults": { "light": "#8A5C00", "dark": "#E8B35A", "highContrast": "#E8B35A", "highContrastLight": "#8A5C00" }
       }
     ],
     "configuration": {
@@ -161,7 +151,7 @@
         "agentContextTrace.showUnverifiedHistoryRanges": {
           "type": "boolean",
           "default": true,
-          "description": "Show explicit saved-chat line ranges in amber when no source revision exists. These are unverified guides, not proof that the current contents were read. Guides are suppressed after edits while that session is selected."
+          "description": "Show explicit saved-chat line ranges using the recorded-read color when no source revision exists. Hover text notes that the file may have changed. Guides are suppressed after edits while that session is selected."
         },
         "agentContextTrace.excludeGlobs": {
           "type": "array",

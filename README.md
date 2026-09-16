@@ -43,17 +43,18 @@ Supported input is the observed VS Code JSON snapshot or JSONL format with snaps
 
 ## Highlighted File Sections
 
-Open a file in the normal editor after selecting a chat or tracker session. Recorded ranges appear automatically as whole-line shading with a left border and overview-ruler marker. Hover over a section for its range and evidence type. The existing eye toggle shows or hides both filename colors and section highlights.
+Open a file in the normal editor after selecting a chat or tracker session. All recorded ranges use the same blue whole-line shading, left border, and overview-ruler marker. Hover over a section for its range and source-version information. The existing eye toggle shows or hides both filename colors and section highlights.
 
 | Highlight | Meaning |
 |-----------|---------|
-| Blue | The read has a snapshot fingerprint that matches the current document, as provided by instrumented tracker reads. |
-| Amber | Copilot history retained explicit line numbers but no source revision. This is an **unverified historical range guide**: the current text at those lines may differ from what the agent read. |
+| Blue | Recorded read range, from either tracker metadata or saved Copilot chat history. The color itself does not imply that the current contents match the historical file. |
 | No shading | Line numbers are absent/invalid, the file is too large, the recorded revision does not match, or highlighting is disabled. Filename colors may still be present. |
+
+For saved-chat ranges without a source revision, the tooltip says **"Historical range; file may have changed."** Tracker ranges with a matching fingerprint identify that match in the tooltip. Missing line numbers never produce a section highlight.
 
 Adjacent/overlapping ranges of the same evidence type are merged; unrelated lines are not shaded. Out-of-bounds ranges are skipped, not silently reassigned to other lines. Editing a document clears stale verified highlights; they can return when the content again matches the recorded fingerprint. Historical guides are suppressed for dirty buffers and after edits observed while that session is selected. Switching away and back to a history session resets this observation guard, but its guides remain explicitly unverified.
 
-Disable `agentContextTrace.showUnverifiedHistoryRanges` to show only revision-verified sections. The default is `true` so saved-chat ranges can be inspected with the amber warning. Theme colors are `agentContextTrace.readSectionBackground`, `agentContextTrace.readSectionBorder`, `agentContextTrace.unverifiedSectionBackground`, and `agentContextTrace.unverifiedSectionBorder`.
+Disable `agentContextTrace.showUnverifiedHistoryRanges` to show only revision-verified sections. The default is `true` so saved-chat ranges can be inspected with the historical-version tooltip. All sections share the `agentContextTrace.readSectionBackground` and `agentContextTrace.readSectionBorder` theme colors; the former separate historical color IDs are no longer used.
 
 Only visible local editors with matching recorded paths are processed, including split panes. Document fingerprints are cached by document version in memory, are not persisted for history guides, and are bounded to 1 MiB. Opening files or updating decorations never generates agent-read events or modifies source. The absence of section highlights is not proof that the agent did not read that section.
 
@@ -100,7 +101,7 @@ Browse and open files in the normal Explorer. Right-click a file there and choos
 | `npm run check-types` | Strict TypeScript validation. |
 | `npm run compile` | Compile tests and bundle the extension. |
 | `npm run test:unit` | Fifteen tests covering historical line-range formats, highlight merging/revision checks, workspace association, chat replay/extraction, read-only handling, range semantics, path scope, metrics, persistence, and attribution. |
-| `npm run test:extension` | Actual editor section rendering and position, amber guides and opt-out, stale-edit clearing, split editors, shared eye toggle, missing ranges, Explorer colors, grouped picker, history refresh, and restart persistence. |
+| `npm run test:extension` | Actual editor section rendering and position, identical blue shading/borders for tracker and historical reads, history opt-out, stale-edit clearing, split editors, shared eye toggle, missing ranges, Explorer colors, grouped picker, history refresh, and restart persistence. |
 | `npm run package` | Produce a self-contained VSIX without runtime npm installation. |
 
 The host test runner downloads VS Code 1.100.0 by default. To use an installed executable in PowerShell, set `$env:VSCODE_EXECUTABLE_PATH` to the full path of its executable before running the test command. Tests use temporary workspaces/profiles, and screenshots are written to the ignored `.vscode-test/screenshots` directory. Only the test windows expose local debugging endpoints; the extension does not start a server.

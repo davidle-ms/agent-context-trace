@@ -173,10 +173,12 @@ export async function run(): Promise<void> {
             .some(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
         const verifiedMarks = await page.locator('.monaco-editor .view-overlays .cdr').evaluateAll(elements => elements
             .filter(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0)
-            .map(element => ({ top: (element as HTMLElement).offsetTop, height: (element as HTMLElement).offsetHeight })));
+            .map(element => ({ top: (element as HTMLElement).offsetTop, height: (element as HTMLElement).offsetHeight,
+                background: getComputedStyle(element).backgroundColor, border: getComputedStyle(element).borderLeftColor })));
         assert.equal(verifiedMarks.length, 1, 'Only the single matching read line is shaded');
         assert.equal(verifiedMarks[0]?.top, 0, 'Decoration is on the first recorded line, not the cursor line');
         assert.ok(verifiedMarks[0]!.height > 0);
+        assert.ok(!extension.packageJSON.contributes.colors.some((color: { id: string }) => color.id.startsWith('agentContextTrace.unverifiedSection')), 'Recorded reads use one theme palette');
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-colors-on.png') });
         await vscode.commands.executeCommand('agentContextTrace.toggleFileColors');
         await page.waitForFunction(() => {
@@ -192,10 +194,18 @@ export async function run(): Promise<void> {
             recognizedCalls: 1, unmappedCalls: 0, events: [{ id: 'history-range', rootId: root.id, relativePath: 'source.ts', startLine: 2, endLine: 3 }] });
         assert.deepEqual(runtime.view.editorHighlights(document), { verified: [], unverified: [{ startLine: 2, endLine: 3 }] });
         await page.waitForFunction(() => Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
-            .filter(element => getComputedStyle(element).borderLeftColor === 'rgb(232, 179, 90)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0).length === 2);
-        assert.match(String(runtime.view.tree.message), /source revision unverified/);
-        await section.getByText(/Amber sections: source revision unverified/).waitFor();
-        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-sections-unverified.png') });
+            .filter(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0).length === 2);
+        const historicalMarks = await page.locator('.monaco-editor .view-overlays .cdr').evaluateAll(elements => elements
+            .filter(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0)
+            .map(element => ({ background: getComputedStyle(element).backgroundColor, border: getComputedStyle(element).borderLeftColor })));
+        assert.equal(historicalMarks.length, 2);
+        for (const mark of historicalMarks) {
+            assert.equal(mark.background, verifiedMarks[0]!.background, 'History and verified reads have identical shading');
+            assert.equal(mark.border, verifiedMarks[0]!.border, 'History and verified reads have identical borders');
+        }
+        assert.doesNotMatch(String(runtime.view.tree.message), /amber/i);
+        await section.getByText('Local Copilot history: 1 recorded read in this repository (best effort)', { exact: true }).waitFor();
+        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-sections-history.png') });
         const priorUnverified = configuration.inspect<boolean>('showUnverifiedHistoryRanges')?.globalValue;
         try {
             await configuration.update('showUnverifiedHistoryRanges', false, vscode.ConfigurationTarget.Global);
@@ -206,7 +216,7 @@ export async function run(): Promise<void> {
             assert.equal(await vscode.workspace.applyEdit(changed), true);
             assert.deepEqual(runtime.view.editorHighlights(document).unverified, [], 'Editing invalidates unverified history guides');
             await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
-                .some(element => getComputedStyle(element).borderLeftColor === 'rgb(232, 179, 90)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
+                .some(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
             const undoEdit = new vscode.WorkspaceEdit();
             undoEdit.delete(sourceUri, new vscode.Range(0, 0, 0, 5));
             await vscode.workspace.applyEdit(undoEdit);
@@ -222,7 +232,7 @@ export async function run(): Promise<void> {
         await runtime.view.toggle();
         await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
             .some(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
-        console.log('PASS: verified read sections, amber unverified history, missing ranges, file edits, split editors, session changes, and eye toggle');
+        console.log('PASS: one color for verified and historical read sections, missing ranges, file edits, split editors, session changes, and eye toggle');
         const details = vscode.commands.executeCommand('agentContextTrace.showDetails', sourceUri);
         const detailPicker = page.locator('.quick-input-widget');
         await detailPicker.getByText('Lines 2-3', { exact: true }).waitFor();
