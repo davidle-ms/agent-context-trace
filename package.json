@@ -126,12 +126,12 @@
     "colors": [
       {
         "id": "agentContextTrace.readFileForeground",
-        "description": "Filename with one recorded read in the selected session.",
+        "description": "Amber filename with one recorded read in the selected session.",
         "defaults": {
-          "light": "#165B9C",
-          "dark": "#70BBFF",
-          "highContrast": "#FFFFFF",
-          "highContrastLight": "#003D80"
+          "light": "#8A5C00",
+          "dark": "#E8B35A",
+          "highContrast": "#FFE0A3",
+          "highContrastLight": "#704900"
         }
       },
       {
@@ -141,23 +141,23 @@
       },
       {
         "id": "agentContextTrace.readSectionBorder",
-        "description": "Border and ruler marker for lines read once in the selected session.",
-        "defaults": { "light": "#165B9C", "dark": "#70BBFF", "highContrast": "#FFFFFF", "highContrastLight": "#003D80" }
+        "description": "Amber vertical border and ruler marker for lines read once in the selected session.",
+        "defaults": { "light": "#8A5C00", "dark": "#E8B35A", "highContrast": "#FFE0A3", "highContrastLight": "#704900" }
       },
       {
         "id": "agentContextTrace.readFileRepeatForeground",
-        "description": "Filename and section border for 2-3 recorded reads in the selected session.",
-        "defaults": { "light": "#124E89", "dark": "#5CA8F0", "highContrast": "#9ACFFF", "highContrastLight": "#00356F" }
+        "description": "Amber filename and vertical section border for 2-3 recorded reads in the selected session.",
+        "defaults": { "light": "#784F00", "dark": "#DAA044", "highContrast": "#F5CB81", "highContrastLight": "#603E00" }
       },
       {
         "id": "agentContextTrace.readFileFrequentForeground",
-        "description": "Filename and section border for 4-7 recorded reads in the selected session.",
-        "defaults": { "light": "#104275", "dark": "#4C95DF", "highContrast": "#70BBFF", "highContrastLight": "#002C60" }
+        "description": "Amber filename and vertical section border for 4-7 recorded reads in the selected session.",
+        "defaults": { "light": "#664200", "dark": "#CC902E", "highContrast": "#E8B35A", "highContrastLight": "#503300" }
       },
       {
         "id": "agentContextTrace.readFileIntenseForeground",
-        "description": "Filename and section border for 8 or more recorded reads in the selected session.",
-        "defaults": { "light": "#0A3561", "dark": "#418AD7", "highContrast": "#5CA8F0", "highContrastLight": "#00234F" }
+        "description": "Amber filename and vertical section border for 8 or more recorded reads in the selected session.",
+        "defaults": { "light": "#553600", "dark": "#BF841C", "highContrast": "#DAA044", "highContrastLight": "#402800" }
       },
       {
         "id": "agentContextTrace.readSectionRepeatBackground",

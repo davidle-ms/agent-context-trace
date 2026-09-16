@@ -15,6 +15,9 @@ export async function run(): Promise<void> {
     assert.ok(extension, 'Development extension is installed');
     const runtime = await extension.activate();
     assert.ok(runtime, 'Extension activated in a trusted local test workspace');
+    const typescript = vscode.workspace.getConfiguration('typescript');
+    const previousValidation = typescript.inspect<boolean>('validate.enable')?.globalValue;
+    await typescript.update('validate.enable', false, vscode.ConfigurationTarget.Global);
     assert.ok(vscode.lm.tools.some(tool => tool.name === TOOL_NAME), 'Tool registered with the host');
     const roots = runtime.roots;
     assert.equal(roots.length, 2);
@@ -40,6 +43,7 @@ export async function run(): Promise<void> {
         await runtime.store.delete(selected.id);
         assert.equal(runtime.view.provideFileDecoration(sourceUri), undefined, 'Deletion removes markers');
         console.log('PASS: session JSON restore, no auto-recording, deletion; workspace preference tested in normal development hosts');
+        await typescript.update('validate.enable', previousValidation, vscode.ConfigurationTarget.Global);
         return;
     }
     const historyFolder = await fs.mkdtemp(path.join(os.tmpdir(), 'act-existing-chat-'));
@@ -170,12 +174,12 @@ export async function run(): Promise<void> {
         assert.equal(await section.getByText('source.ts', { exact: true }).count(), 0, 'No duplicate file listing');
         await page.waitForFunction(() => {
             const target = Array.from(globalThis.document.querySelectorAll('.explorer-folders-view .label-name')).find(element => element.textContent === 'source.ts');
-            return target && getComputedStyle(target).color === 'rgb(92, 168, 240)';
+            return target && getComputedStyle(target).color === 'rgb(218, 160, 68)';
         });
         await page.waitForFunction(() => Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
-            .some(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
+            .some(element => getComputedStyle(element).borderLeftColor === 'rgb(232, 179, 90)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
         const verifiedMarks = await page.locator('.monaco-editor .view-overlays .cdr').evaluateAll(elements => elements
-            .filter(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0)
+            .filter(element => getComputedStyle(element).borderLeftColor === 'rgb(232, 179, 90)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0)
             .map(element => ({ top: (element as HTMLElement).offsetTop, height: (element as HTMLElement).offsetHeight,
                 background: getComputedStyle(element).backgroundColor, border: getComputedStyle(element).borderLeftColor })));
         assert.equal(verifiedMarks.length, 1, 'Only the single matching read line is shaded');
@@ -186,10 +190,10 @@ export async function run(): Promise<void> {
         await vscode.commands.executeCommand('agentContextTrace.toggleFileColors');
         await page.waitForFunction(() => {
             const target = Array.from(globalThis.document.querySelectorAll('.explorer-folders-view .label-name')).find(element => element.textContent === 'source.ts');
-            return target && getComputedStyle(target).color !== 'rgb(92, 168, 240)';
+            return target && getComputedStyle(target).color !== 'rgb(218, 160, 68)';
         });
         await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
-            .some(element => ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)'].includes(getComputedStyle(element).borderLeftColor) && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
+            .some(element => ['rgb(232, 179, 90)', 'rgb(218, 160, 68)', 'rgb(204, 144, 46)', 'rgb(191, 132, 28)'].includes(getComputedStyle(element).borderLeftColor) && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-colors-off.png') });
         assert.equal(runtime.view.enabled, false);
         await runtime.view.toggle();
@@ -197,9 +201,9 @@ export async function run(): Promise<void> {
             recognizedCalls: 1, unmappedCalls: 0, events: [{ id: 'history-range', rootId: root.id, relativePath: 'source.ts', startLine: 2, endLine: 3 }] });
         assert.deepEqual(runtime.view.editorHighlights(document), { verified: [], unverified: [{ startLine: 2, endLine: 3, readCount: 1 }] });
         await page.waitForFunction(() => Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
-            .filter(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0).length === 2);
+            .filter(element => getComputedStyle(element).borderLeftColor === 'rgb(232, 179, 90)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0).length === 2);
         const historicalMarks = await page.locator('.monaco-editor .view-overlays .cdr').evaluateAll(elements => elements
-            .filter(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0)
+            .filter(element => getComputedStyle(element).borderLeftColor === 'rgb(232, 179, 90)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0)
             .map(element => ({ background: getComputedStyle(element).backgroundColor, border: getComputedStyle(element).borderLeftColor })));
         assert.equal(historicalMarks.length, 2);
         for (const mark of historicalMarks) {
@@ -215,10 +219,16 @@ export async function run(): Promise<void> {
                 id: `frequency-${index}`, rootId: root.id, relativePath: 'source.ts', startLine, endLine: 4
             }))
         };
-        for (const [count, suffix] of [[1, ''], [2, 'Repeat'], [4, 'Frequent'], [8, 'Intense']] as const) {
+        for (const [count, suffix, expectedColor] of [[1, '', 'rgb(232, 179, 90)'], [2, 'Repeat', 'rgb(218, 160, 68)'],
+            [4, 'Frequent', 'rgb(204, 144, 46)'], [8, 'Intense', 'rgb(191, 132, 28)']] as const) {
             runtime.view.showHistory({ ...frequencySession, events: frequencySession.events.slice(0, count) });
             assert.equal(runtime.view.provideFileDecoration(sourceUri)?.color?.id, `agentContextTrace.readFile${suffix}Foreground`);
             assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, new RegExp(`${count} recorded read`));
+            await page.waitForFunction(color => {
+                const filename = Array.from(globalThis.document.querySelectorAll('.explorer-folders-view .label-name'))
+                    .find(element => element.textContent === 'source.ts');
+                return filename && getComputedStyle(filename).color === color;
+            }, expectedColor);
         }
         assert.deepEqual(runtime.view.editorHighlights(document).unverified, [
             { startLine: 1, endLine: 1, readCount: 1 }, { startLine: 2, endLine: 2, readCount: 2 },
@@ -233,16 +243,16 @@ export async function run(): Promise<void> {
         await page.waitForFunction(() => {
             const colors = new Set(Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
                 .filter(element => parseFloat(getComputedStyle(element).borderLeftWidth) > 0).map(element => getComputedStyle(element).borderLeftColor));
-            return ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)'].every(color => colors.has(color));
+            return ['rgb(232, 179, 90)', 'rgb(218, 160, 68)', 'rgb(204, 144, 46)', 'rgb(191, 132, 28)'].every(color => colors.has(color));
         });
         const frequencyMarks = await page.locator('.monaco-editor .view-overlays .cdr').evaluateAll(elements => elements
-            .filter(element => ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)'].includes(getComputedStyle(element).borderLeftColor)
+            .filter(element => ['rgb(232, 179, 90)', 'rgb(218, 160, 68)', 'rgb(204, 144, 46)', 'rgb(191, 132, 28)'].includes(getComputedStyle(element).borderLeftColor)
                 && parseFloat(getComputedStyle(element).borderLeftWidth) > 0)
             .map(element => ({ lineTop: (element.parentElement as HTMLElement).offsetTop, color: getComputedStyle(element).borderLeftColor,
                 channels: getComputedStyle(element).backgroundColor.match(/[\d.]+/g)?.slice(0, 3).map(Number),
                 alpha: Number(getComputedStyle(element).backgroundColor.match(/[\d.]+/g)?.[3]) })).sort((left, right) => left.lineTop - right.lineTop));
         assert.equal(frequencyMarks.length, 4, 'Exactly four recorded lines have frequency highlights');
-        assert.deepEqual(frequencyMarks.map(mark => mark.color), ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)']);
+        assert.deepEqual(frequencyMarks.map(mark => mark.color), ['rgb(232, 179, 90)', 'rgb(218, 160, 68)', 'rgb(204, 144, 46)', 'rgb(191, 132, 28)']);
         for (const mark of frequencyMarks) {
             assert.deepEqual(mark.channels, [232, 179, 90], 'All frequency tiers use amber backgrounds');
         }
@@ -267,7 +277,7 @@ export async function run(): Promise<void> {
         await runtime.view.toggle();
         assert.deepEqual(runtime.view.editorHighlights(document), { verified: [], unverified: [] });
         await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
-            .some(element => ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)'].includes(getComputedStyle(element).borderLeftColor)
+            .some(element => ['rgb(232, 179, 90)', 'rgb(218, 160, 68)', 'rgb(204, 144, 46)', 'rgb(191, 132, 28)'].includes(getComputedStyle(element).borderLeftColor)
                 && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
         assert.deepEqual(await textColors(), shadedTextColors, 'Highlighting leaves syntax foreground colors unchanged');
         await runtime.view.toggle();
@@ -276,7 +286,7 @@ export async function run(): Promise<void> {
         runtime.view.showHistory(missingRange);
         assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /9 recorded reads/);
         assert.deepEqual(runtime.view.editorHighlights(document), beforeRefresh, 'File-only reads affect the file total but no section counts');
-        console.log('PASS: four amber background tiers with blue edges, unchanged syntax colors, no inline labels, exact-count hover, and toggling');
+        console.log('PASS: four amber filename and vertical-edge tiers, amber backgrounds, unchanged syntax colors, no inline labels, exact-count hover, and toggling');
         const priorUnverified = configuration.inspect<boolean>('showUnverifiedHistoryRanges')?.globalValue;
         try {
             await configuration.update('showUnverifiedHistoryRanges', false, vscode.ConfigurationTarget.Global);
@@ -287,7 +297,7 @@ export async function run(): Promise<void> {
             assert.equal(await vscode.workspace.applyEdit(changed), true);
             assert.deepEqual(runtime.view.editorHighlights(document).unverified, [], 'Editing invalidates unverified history guides');
             await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
-                .some(element => ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)'].includes(getComputedStyle(element).borderLeftColor)
+                .some(element => ['rgb(232, 179, 90)', 'rgb(218, 160, 68)', 'rgb(204, 144, 46)', 'rgb(191, 132, 28)'].includes(getComputedStyle(element).borderLeftColor)
                     && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
             const undoEdit = new vscode.WorkspaceEdit();
             undoEdit.delete(sourceUri, new vscode.Range(0, 0, 0, 5));
@@ -300,11 +310,11 @@ export async function run(): Promise<void> {
         const split = await vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Beside, preview: false });
         assert.notEqual(split, sourceEditor);
         await page.waitForFunction(() => Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
-            .filter(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0).length >= 2);
+            .filter(element => getComputedStyle(element).borderLeftColor === 'rgb(232, 179, 90)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0).length >= 2);
         await runtime.view.toggle();
         await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
-            .some(element => getComputedStyle(element).borderLeftColor === 'rgb(112, 187, 255)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
-        console.log('PASS: same blue frequency scale for tracker and historical reads, missing ranges, file edits, split editors, session changes, and eye toggle');
+            .some(element => getComputedStyle(element).borderLeftColor === 'rgb(232, 179, 90)' && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
+        console.log('PASS: same amber frequency scale for tracker and historical reads, missing ranges, file edits, split editors, session changes, and eye toggle');
         const details = vscode.commands.executeCommand('agentContextTrace.showDetails', sourceUri);
         const detailPicker = page.locator('.quick-input-widget');
         await detailPicker.getByText('Lines 2-3', { exact: true }).waitFor();
@@ -356,5 +366,6 @@ export async function run(): Promise<void> {
     } finally { await browser.close(); }
     decorationChanges.dispose();
     console.log('PASS: registered tool, numbered read, built-in Explorer filename text colors and toggle, neutral files, multi-root scope, exclusions, dirty buffers, cancellation, session selection');
+    await typescript.update('validate.enable', previousValidation, vscode.ConfigurationTarget.Global);
     await vscode.commands.executeCommand('workbench.action.quit');
 }

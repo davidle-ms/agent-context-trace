@@ -1,6 +1,6 @@
 # Agent Context Trace
 
-A VS Code extension that shades filenames in the built-in **Explorer** and recorded sections inside open editors by how often they were read in the selected session. Editor sections use progressively stronger amber backgrounds with blue edge markers; Explorer filenames retain their blue frequency shades. Syntax colors are unchanged, and no inline count labels are added. **Agent Read Coverage** contains session controls and status only, with no duplicate file tree. The eye toggle controls both surfaces without stopping history refresh or optional tracker recording.
+A VS Code extension that shades filenames in the built-in **Explorer** and recorded sections inside open editors by how often they were read in the selected session. Editor sections use progressively stronger amber backgrounds with amber edge markers; Explorer filenames use matching amber frequency shades. Syntax colors are unchanged, and no inline count labels are added. **Agent Read Coverage** contains session controls and status only, with no duplicate file tree. The eye toggle controls both surfaces without stopping history refresh or optional tracker recording.
 
 ## Preview Status
 
@@ -25,7 +25,7 @@ Alternatively, run `npm run package` and install the resulting VSIX using **Exte
 1. Click the history button in Agent Read Coverage, or run **Agent Context Trace: Choose Copilot Chat Session**.
 2. On first use, approve read-only access to local history. This adapter uses private, version-dependent storage, not a supported cross-extension Copilot API.
 3. Select an existing chat under **This Repository** at the top, or **Other Sessions** underneath. Each group is sorted by most recently saved first, with timestamps displayed in local time. No new tracker session is created, no prompt needs changing, and the Copilot chat itself is not opened or modified.
-4. Filenames with recognized read entries turn blue in this repository. Reads pointing outside the current workspace or excluded paths are not displayed.
+4. Filenames with recognized read entries turn amber in this repository. Reads pointing outside the current workspace or excluded paths are not displayed.
 5. Continue using that chat normally in Copilot. The extension watches the selected history file and refreshes when VS Code saves changes. Use **Refresh Repository** if a write notification is missed. Updates can lag the live conversation.
 6. Use **Toggle Read Colors** to show/hide markers without detaching from history. The selected history file and consent choice are remembered locally for reloads.
 
@@ -43,7 +43,7 @@ Supported input is the observed VS Code JSON snapshot or JSONL format with snaps
 
 ## Highlighted File Sections
 
-Open a file in the normal editor after selecting a chat or tracker session. Recorded ranges use amber whole-line shading with blue left-edge and overview-ruler markers. Background intensity increases with read frequency, without recoloring the code text. Hover over a section for its exact count, range, and source-version information. The existing eye toggle shows or hides both filename colors and section highlights.
+Open a file in the normal editor after selecting a chat or tracker session. Recorded ranges use amber whole-line shading with amber left-edge and overview-ruler markers. Background intensity increases with read frequency, without recoloring the code text. Hover over a section for its exact count, range, and source-version information. The existing eye toggle shows or hides both filename colors and section highlights.
 
 | Highlight | Meaning |
 |-----------|---------|
@@ -53,7 +53,7 @@ Open a file in the normal editor after selecting a chat or tracker session. Reco
 | Strongest amber | 8 or more recorded reads. The exact count remains in the tooltip. |
 | No shading | Line numbers are absent/invalid, the file is too large, the recorded revision does not match, or highlighting is disabled. Filename colors may still be present. |
 
-The scale is fixed, not relative to the most-read file. Both tracker and saved-chat evidence use the same amber backgrounds and blue markers at the same counts. Amber means recorded read frequency here, not an error, warning, or unverified source revision. More reads increase the background opacity on both light and dark themes. A short scale legend is shown in Agent Read Coverage. The shade does not imply model understanding, task quality, or that a historical range matches today's contents. Existing theme color IDs are preserved, so explicit user overrides still take precedence over these defaults.
+The scale is fixed, not relative to the most-read file. Both tracker and saved-chat evidence use the same amber backgrounds and markers at the same counts. Amber means recorded read frequency here, not an error, warning, or unverified source revision. More reads increase the background opacity on both light and dark themes. A short scale legend is shown in Agent Read Coverage. The shade does not imply model understanding, task quality, or that a historical range matches today's contents. Existing theme color IDs are preserved, so explicit user overrides still take precedence over these defaults.
 
 Editor counts are **per line**: reads of lines 1-10 and 5-15 shade lines 5-10 more strongly (two reads) and leave the rest at one read. Adjacent spans merge only when they have the same count and evidence type. Explorer filename counts are **distinct recorded calls to that file** across the selected session, including calls with missing line numbers and earlier revisions. Such calls do not add to current-line counts. Repeated event IDs, view refreshes, and toggling do not inflate counts; choosing another session replaces them. Persisted history remains unchanged.
 
@@ -70,10 +70,10 @@ Only visible local editors with matching recorded paths are processed, including
 1. Run **Agent Context Trace: Start Session** and enter a name. This copies a tool reference with the tracker session ID to your clipboard.
 2. Enable **Read File with Context Trace** in Copilot's tools picker, then paste the reference into your prompt. The tool name for APIs is `read_agent_context`; the prompt reference is `#agentContextRead`.
 3. Ask Copilot to read a specific file and range through that tool. Approve the tool confirmation as appropriate.
-4. Recorded filenames turn blue and gain an `R` badge in the built-in Explorer. Folders and files with no recorded reads receive no decoration from this extension; Agent Read Coverage does not list files.
+4. Recorded filenames turn amber and gain an `R` badge in the built-in Explorer. Folders and files with no recorded reads receive no decoration from this extension; Agent Read Coverage does not list files.
 5. Use the eye button or **Agent Context Trace: Toggle Read Colors** to hide or show markers. The preference survives restarting VS Code. Recording continues while markers are hidden.
 
-Keep VS Code's `explorer.decorations.colors` enabled to see filename shades. The base `agentContextTrace.readFileForeground` theme color applies to files read once; the higher-frequency theme IDs are listed above. Selection styling and other providers such as Git can affect the final displayed color; turning this extension's colors off restores the remaining theme/provider styling, not necessarily plain white text. VS Code's file decorations are shared, so recorded-file decorations may also appear in editor tabs or Open Editors. Source content is never changed by coloring.
+Keep VS Code's `explorer.decorations.colors` enabled to see filename shades. The base `agentContextTrace.readFileForeground` theme color applies to files read once; the higher-frequency theme IDs are listed above. Selection styling and other providers such as Git or diagnostics can affect the final displayed color; turning this extension's colors off restores the remaining theme/provider styling, not necessarily plain white text. VS Code's file decorations are shared, so recorded-file decorations may also appear in editor tabs or Open Editors. Source content is never changed by coloring.
 
 Example after replacing the session ID and absolute file path:
 
@@ -108,10 +108,10 @@ Browse and open files in the normal Explorer. Right-click a file there and choos
 | `npm run check-types` | Strict TypeScript validation. |
 | `npm run compile` | Compile tests and bundle the extension. |
 | `npm run test:unit` | Sixteen tests covering per-line frequency, inclusive overlaps, tier boundaries, deduplication, large intervals, revision checks, historical line-range formats, workspace association, chat replay/extraction, read-only handling, path scope, persistence, and attribution. |
-| `npm run test:extension` | Four amber background tiers with retained blue markers, unchanged syntax colors and no inline labels, exact-count tooltip, per-line overlaps, deduplication, edit invalidation, split editors, shared toggle, grouped picker, and restart persistence. |
+| `npm run test:extension` | Four amber filename, vertical-marker, and background tiers, unchanged syntax colors and no inline labels, exact-count tooltip, per-line overlaps, deduplication, edit invalidation, split editors, shared toggle, grouped picker, and restart persistence. |
 | `npm run package` | Produce a self-contained VSIX without runtime npm installation. |
 
-The host test runner downloads VS Code 1.100.0 by default. To use an installed executable in PowerShell, set `$env:VSCODE_EXECUTABLE_PATH` to the full path of its executable before running the test command. Tests use temporary workspaces/profiles, and screenshots are written to the ignored `.vscode-test/screenshots` directory. Only the test windows expose local debugging endpoints; the extension does not start a server.
+The host test runner downloads VS Code 1.100.0 by default. To use an installed executable in PowerShell, set `$env:VSCODE_EXECUTABLE_PATH` to the full path of its executable before running the test command. Tests use temporary workspaces/profiles, and screenshots are written to the ignored `.vscode-test/screenshots` directory. TypeScript validation is temporarily disabled in the test profile so placeholder-code diagnostics do not override filename palette checks; normal user settings are untouched. Only the test windows expose local debugging endpoints; the extension does not start a server.
 
 VS Code intentionally uses in-memory workspace/profile storage when `--extensionTestsPath` is present. The persistence regression therefore launches two **normal** isolated development windows and operates the UI through Playwright, rather than expecting test-mode storage to survive another process. See the [VS Code storage implementation](https://github.com/microsoft/vscode/blob/main/src/vs/platform/storage/electron-main/storageMainService.ts).
 
