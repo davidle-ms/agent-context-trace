@@ -1,6 +1,6 @@
 # Agent Context Trace
 
-A VS Code extension that shades filenames in the built-in **Explorer** and recorded sections inside open editors by how often they were read in the selected session. More recorded reads produce a stronger blue shade. **Agent Read Coverage** contains session controls and status only, with no duplicate file tree. The eye toggle controls both surfaces without stopping history refresh or optional tracker recording.
+A VS Code extension that shades filenames in the built-in **Explorer** and recorded sections inside open editors by how often they were read in the selected session. Editor sections use progressively stronger neutral-gray backgrounds with blue edge markers; Explorer filenames retain their blue frequency shades. Syntax colors are unchanged, and no inline count labels are added. **Agent Read Coverage** contains session controls and status only, with no duplicate file tree. The eye toggle controls both surfaces without stopping history refresh or optional tracker recording.
 
 ## Preview Status
 
@@ -43,17 +43,17 @@ Supported input is the observed VS Code JSON snapshot or JSONL format with snaps
 
 ## Highlighted File Sections
 
-Open a file in the normal editor after selecting a chat or tracker session. Recorded ranges use blue whole-line shading, a left border, and an overview-ruler marker, with intensity based on read frequency. Hover over a section for its exact count, range, and source-version information. The existing eye toggle shows or hides both filename colors and section highlights.
+Open a file in the normal editor after selecting a chat or tracker session. Recorded ranges use neutral-gray whole-line shading with blue left-edge and overview-ruler markers. Background intensity increases with read frequency, without recoloring the code text. Hover over a section for its exact count, range, and source-version information. The existing eye toggle shows or hides both filename colors and section highlights.
 
 | Highlight | Meaning |
 |-----------|---------|
-| Light blue | 1 recorded read. |
-| Medium blue | 2-3 recorded reads. |
-| Strong blue | 4-7 recorded reads. |
-| Strongest blue | 8 or more recorded reads. The exact count remains in the tooltip. |
+| Subtle gray | 1 recorded read. |
+| Medium gray | 2-3 recorded reads. |
+| Strong gray | 4-7 recorded reads. |
+| Strongest gray | 8 or more recorded reads. The exact count remains in the tooltip. |
 | No shading | Line numbers are absent/invalid, the file is too large, the recorded revision does not match, or highlighting is disabled. Filename colors may still be present. |
 
-The scale is fixed, not relative to the most-read file. Both tracker and saved-chat evidence use the same blue shades at the same counts. On dark themes stronger background opacity makes frequently read sections more prominent; on light themes they appear deeper blue. A short scale legend is shown in Agent Read Coverage. The shade does not imply model understanding, task quality, or that a historical range matches today's contents.
+The scale is fixed, not relative to the most-read file. Both tracker and saved-chat evidence use the same gray backgrounds and blue markers at the same counts. On dark themes more reads produce a lighter, stronger gray band; on light themes they produce a darker gray band. A short scale legend is shown in Agent Read Coverage. The shade does not imply model understanding, task quality, or that a historical range matches today's contents. Existing theme color IDs are preserved, so explicit user overrides still take precedence over these defaults.
 
 Editor counts are **per line**: reads of lines 1-10 and 5-15 shade lines 5-10 more strongly (two reads) and leave the rest at one read. Adjacent spans merge only when they have the same count and evidence type. Explorer filename counts are **distinct recorded calls to that file** across the selected session, including calls with missing line numbers and earlier revisions. Such calls do not add to current-line counts. Repeated event IDs, view refreshes, and toggling do not inflate counts; choosing another session replaces them. Persisted history remains unchanged.
 
@@ -108,7 +108,7 @@ Browse and open files in the normal Explorer. Right-click a file there and choos
 | `npm run check-types` | Strict TypeScript validation. |
 | `npm run compile` | Compile tests and bundle the extension. |
 | `npm run test:unit` | Sixteen tests covering per-line frequency, inclusive overlaps, tier boundaries, deduplication, large intervals, revision checks, historical line-range formats, workspace association, chat replay/extraction, read-only handling, path scope, persistence, and attribution. |
-| `npm run test:extension` | Four progressively stronger blue tiers, exact-count tooltip, filename totals vs per-line overlaps, refresh deduplication, session isolation, edit invalidation, split editors, shared toggle, grouped picker, history refresh, and restart persistence. |
+| `npm run test:extension` | Four neutral-gray background tiers with retained blue markers, unchanged syntax colors and no inline labels, exact-count tooltip, per-line overlaps, deduplication, edit invalidation, split editors, shared toggle, grouped picker, and restart persistence. |
 | `npm run package` | Produce a self-contained VSIX without runtime npm installation. |
 
 The host test runner downloads VS Code 1.100.0 by default. To use an installed executable in PowerShell, set `$env:VSCODE_EXECUTABLE_PATH` to the full path of its executable before running the test command. Tests use temporary workspaces/profiles, and screenshots are written to the ignored `.vscode-test/screenshots` directory. Only the test windows expose local debugging endpoints; the extension does not start a server.

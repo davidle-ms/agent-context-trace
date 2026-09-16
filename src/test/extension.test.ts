@@ -239,14 +239,27 @@ export async function run(): Promise<void> {
             .filter(element => ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)'].includes(getComputedStyle(element).borderLeftColor)
                 && parseFloat(getComputedStyle(element).borderLeftWidth) > 0)
             .map(element => ({ lineTop: (element.parentElement as HTMLElement).offsetTop, color: getComputedStyle(element).borderLeftColor,
+                channels: getComputedStyle(element).backgroundColor.match(/[\d.]+/g)?.slice(0, 3).map(Number),
                 alpha: Number(getComputedStyle(element).backgroundColor.match(/[\d.]+/g)?.[3]) })).sort((left, right) => left.lineTop - right.lineTop));
         assert.equal(frequencyMarks.length, 4, 'Exactly four recorded lines have frequency highlights');
         assert.deepEqual(frequencyMarks.map(mark => mark.color), ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)']);
+        for (const mark of frequencyMarks) {
+            assert.equal(mark.channels?.length, 3);
+            assert.equal(mark.channels![0], mark.channels![1], 'Read backgrounds are neutral, not blue');
+            assert.equal(mark.channels![1], mark.channels![2]);
+        }
         for (let index = 1; index < frequencyMarks.length; index++) {
             assert.ok(frequencyMarks[index]!.lineTop > frequencyMarks[index - 1]!.lineTop);
-            assert.ok(frequencyMarks[index]!.alpha > frequencyMarks[index - 1]!.alpha, 'Repeated-read backgrounds have progressively stronger blue shading');
+            assert.ok(frequencyMarks[index]!.alpha > frequencyMarks[index - 1]!.alpha, 'Repeated-read backgrounds have progressively stronger neutral shading');
         }
-        await section.getByText(/Blue intensity: 1 \/ 2-3 \/ 4-7 \/ 8\+ reads/).waitFor();
+        await section.getByText(/Gray shading: 1 \/ 2-3 \/ 4-7 \/ 8\+ reads/).waitFor();
+        assert.equal(await page.locator('.monaco-editor .view-lines span').evaluateAll(elements => elements
+            .filter(element => /^"Read \d+ times?"$/.test(getComputedStyle(element, '::after').content)).length), 0, 'No inline count labels are added');
+        const textColors = () => page.locator('.monaco-editor .view-lines .view-line span').evaluateAll(elements => elements
+            .filter(element => element.children.length === 0 && !!element.textContent)
+            .map(element => ({ text: element.textContent, color: getComputedStyle(element).color })));
+        const shadedTextColors = await textColors();
+        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-frequency-gray.png') });
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-frequency-shades.png') });
         const fourthLine = page.locator('.monaco-editor .view-lines .view-line').getByText('fourth', { exact: true }).first();
         await fourthLine.hover({ position: { x: 4, y: 6 } });
@@ -258,13 +271,14 @@ export async function run(): Promise<void> {
         await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
             .some(element => ['rgb(112, 187, 255)', 'rgb(92, 168, 240)', 'rgb(76, 149, 223)', 'rgb(65, 138, 215)'].includes(getComputedStyle(element).borderLeftColor)
                 && parseFloat(getComputedStyle(element).borderLeftWidth) > 0));
+        assert.deepEqual(await textColors(), shadedTextColors, 'Highlighting leaves syntax foreground colors unchanged');
         await runtime.view.toggle();
         assert.deepEqual(runtime.view.editorHighlights(document), beforeRefresh, 'Re-enabling restores the same counts');
         const missingRange = { ...frequencySession, events: [...frequencySession.events, { id: 'no-range', rootId: root.id, relativePath: 'source.ts' }] };
         runtime.view.showHistory(missingRange);
         assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /9 recorded reads/);
         assert.deepEqual(runtime.view.editorHighlights(document), beforeRefresh, 'File-only reads affect the file total but no section counts');
-        console.log('PASS: four blue frequency tiers, per-line overlaps, per-file counts, exact-count hover, refresh deduplication, and toggling');
+        console.log('PASS: four neutral-gray background tiers with blue edges, unchanged syntax colors, no inline labels, exact-count hover, and toggling');
         const priorUnverified = configuration.inspect<boolean>('showUnverifiedHistoryRanges')?.globalValue;
         try {
             await configuration.update('showUnverifiedHistoryRanges', false, vscode.ConfigurationTarget.Global);

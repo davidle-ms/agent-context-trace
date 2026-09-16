@@ -136,8 +136,8 @@
       },
       {
         "id": "agentContextTrace.readSectionBackground",
-        "description": "Background for lines read once in the selected session. Hover for exact counts and source-revision details.",
-        "defaults": { "light": "#165B9C18", "dark": "#70BBFF22", "highContrast": "#70BBFF22", "highContrastLight": "#003D8018" }
+        "description": "Neutral-gray background for lines read once in the selected session. Hover for exact counts and source-revision details.",
+        "defaults": { "light": "#0000000A", "dark": "#FFFFFF0D", "highContrast": "#FFFFFF0D", "highContrastLight": "#0000000A" }
       },
       {
         "id": "agentContextTrace.readSectionBorder",
@@ -161,18 +161,18 @@
       },
       {
         "id": "agentContextTrace.readSectionRepeatBackground",
-        "description": "Section background for 2-3 recorded reads per line in the selected session.",
-        "defaults": { "light": "#165B9C30", "dark": "#70BBFF3D", "highContrast": "#70BBFF3D", "highContrastLight": "#003D8030" }
+        "description": "Neutral-gray section background for 2-3 recorded reads per line in the selected session.",
+        "defaults": { "light": "#00000017", "dark": "#FFFFFF1F", "highContrast": "#FFFFFF1F", "highContrastLight": "#00000017" }
       },
       {
         "id": "agentContextTrace.readSectionFrequentBackground",
-        "description": "Section background for 4-7 recorded reads per line in the selected session.",
-        "defaults": { "light": "#165B9C48", "dark": "#70BBFF60", "highContrast": "#70BBFF60", "highContrastLight": "#003D8048" }
+        "description": "Neutral-gray section background for 4-7 recorded reads per line in the selected session.",
+        "defaults": { "light": "#00000026", "dark": "#FFFFFF33", "highContrast": "#FFFFFF33", "highContrastLight": "#00000026" }
       },
       {
         "id": "agentContextTrace.readSectionIntenseBackground",
-        "description": "Section background for 8 or more recorded reads per line in the selected session.",
-        "defaults": { "light": "#165B9C66", "dark": "#70BBFF85", "highContrast": "#70BBFF85", "highContrastLight": "#003D8066" }
+        "description": "Neutral-gray section background for 8 or more recorded reads per line in the selected session.",
+        "defaults": { "light": "#00000038", "dark": "#FFFFFF4D", "highContrast": "#FFFFFF4D", "highContrastLight": "#00000038" }
       }
     ],
     "configuration": {

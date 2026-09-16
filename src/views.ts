@@ -134,7 +134,7 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
         }
         this.tree.description = `${session?.label ?? 'No session selected'} | Colors ${this.enabled ? 'on' : 'off'}`;
         this.tree.message = session?.coverage === 'copilot-history-read-metadata' ? historyStatus(session) : 'Instrumented reads only';
-        if (session?.events.length) { this.tree.message += '\nBlue intensity: 1 / 2-3 / 4-7 / 8+ reads. Hover for exact counts.'; }
+        if (session?.events.length) { this.tree.message += '\nGray shading: 1 / 2-3 / 4-7 / 8+ reads. Hover for exact counts.'; }
         if (session?.coverage === 'copilot-history-read-metadata' && session.events.length
             && !session.events.some(event => event.startLine !== undefined && event.endLine !== undefined)) {
             this.tree.message += '\nSection highlights unavailable: no line ranges saved.';
