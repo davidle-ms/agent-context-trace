@@ -3,7 +3,6 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 export const TOOL_NAME = 'read_agent_context';
-export const VIEW_SCHEME = 'agent-context-trace';
 export const MAX_FILE_BYTES = 1024 * 1024;
 export const MAX_EVENTS = 1000;
 export const MAX_SESSIONS = 100;

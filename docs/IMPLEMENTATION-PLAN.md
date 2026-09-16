@@ -6,13 +6,13 @@ Target: A local-first TypeScript extension for desktop VS Code and GitHub Copilo
 
 ### Implementation Checkpoint
 
-Implemented: repository-grouped Copilot chat picker, opt-in read-only local-history adapter, selected-file watcher, optional registered read tool and tracker sessions, lazy repository tree, file colors/badges, persisted color toggle, historical read details, and JSON export. Thirteen core/parser tests and native host checks pass on Windows VS Code 1.138.0, including workspace association, native picker grouping/order/selection, choosing existing history without a tracker, live zero-to-first-read updates, rendered colors, multi-root identities, and workspace preference persistence.
+Implemented: repository-grouped Copilot chat picker, opt-in read-only local-history adapter, selected-file watcher, optional registered read tool and tracker sessions, built-in Explorer file colors/badges, a controls-only coverage section, persisted color toggle, historical read details, and JSON export. Thirteen core/parser tests and native host checks pass on Windows VS Code 1.138.0, including workspace association, picker grouping/order/selection, existing history, live read updates, Explorer colors, absence of duplicate file entries, read-details access, multi-root identities, and workspace preference persistence.
 
 Picker grouping: This Repository contains chats whose saved folder or multi-root workspace roots match a current root; Other Sessions underneath contains the remaining chats. Each group is newest-first by saved history modification time and independently capped at 100 entries. Current workspace storage is always considered. Unknown metadata remains in the lower group; titles and incidental read paths do not establish repository ownership. Open History actions remain at the bottom. Metadata parsing is bounded and uses a JSONC parser for VS Code workspace files; its ESM entry is bundled into the extension.
 
 Session workflow clarification: Choose Copilot Chat Session is now the primary action. Existing-chat mode reads private JSON/JSONL history after consent, filters supported completed/confirmed read-tool entries to the current workspace, and never writes to Copilot history. It stores no copied source/transcript and makes no claim of complete coverage. Unavailable line ranges/revisions stay unknown. Tracker mode remains an optional stable-API fallback. This explicitly supersedes the original tracker-only scope and no-history-adapter decision below; remaining task tables primarily describe the instrumented path.
 
-Explorer clarification: recorded filename text is now colored in the built-in Explorer as well as Agent Read Coverage. Native UI tests check the computed filename text color and capture on/off screenshots. Real-file decorations are shared by VS Code and may also appear in tabs; the scope is the selected session's recorded workspace paths, not a single view.
+Explorer clarification: the duplicate file directory in Agent Read Coverage has been removed. That section now contains controls and status only; built-in Explorer provides file browsing and filename colors. Show Recorded Read Details is available in the built-in Explorer context menu or from the Command Palette for the active file. Display-only URIs, directory enumeration, and custom-tree directory watchers are removed. This supersedes all custom repository-tree proposals below. Native tests check zero rows in coverage, real Explorer colors, read details, and preserved controls. Real-file decorations may also appear in tabs because VS Code shares them across surfaces.
 
 The original plan below remains the target design, not a claim that every task is complete. Current source is consolidated into core, extension, and views modules; tests use Node's test runner plus assertion-based host tests, not Mocha. Initial storage limits are 1,000 events and 4 MiB per session, with 100 retained session files. Only prepared successful reads are persisted. The toolbar currently uses one toggle command/icon; interrupted-session ownership, dynamic workspace roots, global storage budgeting, and large-tree refresh performance need further hardening. See [README.md](../README.md) for actual usage and limitations.
 
@@ -22,7 +22,7 @@ Still unverified: a signed-in Copilot conversation using the tool, enterprise po
 
 GitHub Copilot already exposes some file-reading activity, but developers must piece together individual tool calls to understand context gathering. Reviewing exact line ranges, repeated reads, and activity across sessions is cumbersome.
 
-Agent Context Trace will make recorded reads visible in a dedicated Agent Read Coverage section: a repository file tree that colors files with recorded agent reads and lets the developer toggle those colors on or off. Session details, file summaries, and optional editor line highlights support that primary experience. The initial product provides evidence for investigation, not proof of model reasoning or automatic optimization.
+Agent Context Trace makes recorded reads visible by coloring filenames in the existing Explorer. Agent Read Coverage provides session controls and status without duplicating the file directory. Session details, file summaries, and optional editor line highlights support that primary experience. The initial product provides evidence for investigation, not proof of model reasoning or automatic optimization.
 
 ## 2. Scope and Tracking Contract
 
@@ -33,7 +33,7 @@ Agent Context Trace will make recorded reads visible in a dedicated Agent Read C
 - Contribute a read-only language-model tool that Copilot can invoke explicitly.
 - Capture the requested range and the actual range prepared for return by that tool.
 - Associate events with an explicit, extension-owned tracker session.
-- Provide an Agent Read Coverage section in the Explorer sidebar that mirrors repository folders and files, including files with no recorded reads.
+- Provide an Agent Read Coverage controls/status section, leaving all file browsing in VS Code's built-in Explorer.
 - Color files with recorded reads for the selected tracker session and provide a persistent on/off toggle that affects appearance only.
 - Provide session controls, file navigation, optional editor line highlights, and JSON export.
 - Persist bounded metadata locally, with retention and deletion controls.

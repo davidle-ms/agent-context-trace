@@ -6,7 +6,7 @@ import * as os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { minimatch } from 'minimatch';
 import { hash, ReadInput, Root, resolveFile, sliceRead, TOOL_NAME, TraceStore, validateInput } from './core';
-import { CoverageView, FileNode, historyPickerItems } from './views';
+import { CoverageView, historyPickerItems } from './views';
 import { HistorySession, listHistory, readHistory } from './history';
 
 let running: Runtime | undefined;
@@ -90,8 +90,7 @@ export class Runtime {
         register('copyReference', () => this.copyReference());
         register('toggleFileColors', () => this.view.toggle());
         register('refresh', () => this.historyFile ? this.refreshCopilotHistory() : this.view.refresh());
-        register('openFile', (node: FileNode) => this.view.openFile(node));
-        register('showDetails', (node: FileNode) => this.view.showDetails(node));
+        register('showDetails', (uri?: vscode.Uri) => this.view.showDetails(uri));
         register('export', async () => {
             const session = this.view.selected();
             if (!session) { throw new Error('Select a tracker session first.'); }

@@ -1,7 +1,7 @@
 {
   "name": "agent-context-trace",
   "displayName": "Agent Context Trace",
-  "description": "Visualize recorded agent file reads in a toggleable repository tree.",
+  "description": "Color recorded agent-read filenames in VS Code's built-in Explorer.",
   "version": "0.1.0",
   "publisher": "davidle-ms",
   "private": true,
@@ -115,11 +115,11 @@
           "group": "navigation@4"
         }
       ],
-      "view/item/context": [
+      "explorer/context": [
         {
           "command": "agentContextTrace.showDetails",
-          "when": "view == agentContextTrace.readCoverage && viewItem == recordedFile",
-          "group": "inline"
+          "when": "resourceScheme == file && !explorerResourceIsFolder && isWorkspaceTrusted",
+          "group": "navigation@20"
         }
       ]
     },

@@ -15,17 +15,15 @@ export async function run(): Promise<void> {
     const runtime = await extension.activate();
     assert.ok(runtime, 'Extension activated in a trusted local test workspace');
     assert.ok(vscode.lm.tools.some(tool => tool.name === TOOL_NAME), 'Tool registered with the host');
-    const roots = await runtime.view.getChildren();
+    const roots = runtime.roots;
     assert.equal(roots.length, 2);
-    const children = await runtime.view.getChildren(roots[0]);
-    const source = children.find(node => node.name === 'source.ts')!;
-    const neutral = children.find(node => node.name === 'neutral.ts')!;
-    const other = (await runtime.view.getChildren(roots[1])).find(node => node.name === 'source.ts')!;
-    assert.ok(source && neutral && other);
-    runtime.view.getTreeItem(source);
-    runtime.view.getTreeItem(neutral);
-    runtime.view.getTreeItem(other);
-    const sourceUri = runtime.view.uri(source);
+    const root = roots[0]!;
+    const otherRoot = roots[1]!;
+    const filePath = path.join(root.directory, 'source.ts');
+    const sourceUri = vscode.Uri.file(filePath);
+    const neutralUri = vscode.Uri.file(path.join(root.directory, 'neutral.ts'));
+    const otherUri = vscode.Uri.file(path.join(otherRoot.directory, 'source.ts'));
+    assert.deepEqual(runtime.view.getChildren(), [], 'Coverage controls never enumerate workspace directories');
     if (process.env.ACT_TEST_PHASE === 'restore') {
         const previous = runtime.store.list().find(session => session.label === 'Host test');
         assert.ok(previous, 'Session JSON restored independently of test-mode workspace state');
@@ -42,8 +40,7 @@ export async function run(): Promise<void> {
     }
     const historyFolder = await fs.mkdtemp(path.join(os.tmpdir(), 'act-existing-chat-'));
     try {
-        const root = runtime.roots.find(candidate => candidate.id === source.rootId)!;
-        const sourceFile = path.join(root.directory, source.relativePath);
+        const sourceFile = filePath;
         const file = path.join(historyFolder, 'existing-chat.jsonl');
         const read = { kind: 'toolInvocationSerialized', toolId: 'copilot_readFile', toolCallId: 'history-read', isComplete: true,
             isConfirmed: { type: 1 }, pastTenseMessage: { value: `Read [file](${pathToFileURL(sourceFile)})` } };
@@ -73,44 +70,41 @@ export async function run(): Promise<void> {
         assert.equal(runtime.view.provideFileDecoration(sourceUri), undefined);
         const updated = waitForReads(2);
         const append = JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: [{ ...read, toolCallId: 'second-read',
-            pastTenseMessage: { value: `Read [file](${pathToFileURL(path.join(root.directory, neutral.relativePath))})` } }] }) + '\n';
+            pastTenseMessage: { value: `Read [file](${neutralUri.toString()})` } }] }) + '\n';
         await fs.appendFile(file, append);
         await updated;
         assert.match(String(runtime.view.tree.message), /2 recorded reads in this repository/);
         assert.equal(runtime.view.enabled, false, 'History refresh does not turn colors on');
         await runtime.view.toggle();
-        assert.equal(runtime.view.provideFileDecoration(runtime.view.uri(neutral))?.badge, 'R');
+        assert.equal(runtime.view.provideFileDecoration(neutralUri)?.badge, 'R');
+        assert.deepEqual(runtime.view.getChildren(), [], 'Historical reads never create duplicate file entries');
         assert.equal(await fs.readFile(file, 'utf8'), initial + firstAppend + append, 'Extension never edits Copilot chat history');
         assert.equal(runtime.store.list().length, 0);
         console.log('PASS: existing Copilot chat selection, no tracker session, file-only history colors, selected history watcher, toggle, read-only source');
     } finally { await fs.rm(historyFolder, { recursive: true, force: true }); }
     const sessionId = await runtime.start('Host test');
-    const root = runtime.roots.find(candidate => candidate.id === source.rootId)!;
-    const filePath = path.join(root.directory, source.relativePath);
     const realUri = vscode.Uri.file(filePath);
-    const neutralUri = vscode.Uri.file(path.join(root.directory, neutral.relativePath));
-    const otherRoot = runtime.roots.find(candidate => candidate.id === other.rootId)!;
     const invalidated: string[] = [];
     const decorationChanges = runtime.view.onDidChangeFileDecorations(uris => invalidated.push(...uris.map(uri => uri.toString())));
     const token = new vscode.CancellationTokenSource();
     const invoke = (overrides = {}) => runtime.read({ input: { sessionId, filePath, startLine: 2, endLine: 3, ...overrides }, toolInvocationToken: undefined }, token.token);
     assert.equal(runtime.view.enabled, true);
-    assert.equal(runtime.store.get(sessionId)?.events.length, 0, 'Tree enumeration does not create reads');
+    assert.equal(runtime.store.get(sessionId)?.events.length, 0, 'Showing coverage controls does not create reads');
     const result = await invoke();
     assert.ok((result.content[0] as vscode.LanguageModelTextPart).value.endsWith('2: second\n3: third'));
     assert.equal(runtime.view.provideFileDecoration(sourceUri)?.badge, 'R');
-    assert.equal(runtime.view.provideFileDecoration(runtime.view.uri(neutral)), undefined);
-    assert.equal(runtime.view.provideFileDecoration(runtime.view.uri(other)), undefined, 'Multi-root identity is isolated');
+    assert.equal(runtime.view.provideFileDecoration(neutralUri), undefined);
+    assert.equal(runtime.view.provideFileDecoration(otherUri), undefined, 'Multi-root identity is isolated');
     assert.equal(runtime.view.provideFileDecoration(realUri)?.color?.id, 'agentContextTrace.readFileForeground', 'Explorer filename gets the read color');
     assert.ok(invalidated.includes(realUri.toString()), 'Recording invalidates the real Explorer URI');
     assert.equal(runtime.view.provideFileDecoration(neutralUri), undefined, 'Unrecorded Explorer file is neutral');
-    assert.equal(runtime.view.provideFileDecoration(vscode.Uri.file(path.join(otherRoot.directory, other.relativePath))), undefined, 'Same-named Explorer file in another root is neutral');
+    assert.equal(runtime.view.provideFileDecoration(otherUri), undefined, 'Same-named Explorer file in another root is neutral');
     assert.equal(runtime.view.provideFileDecoration(vscode.Uri.file(root.directory)), undefined, 'Explorer folders are neutral');
     assert.equal(runtime.view.provideFileDecoration(realUri.with({ scheme: 'git' })), undefined, 'Other URI schemes are untouched');
     if (process.platform === 'win32') {
         assert.equal(runtime.view.provideFileDecoration(vscode.Uri.file(filePath.toUpperCase()))?.badge, 'R', 'Windows path casing is ignored');
     }
-    assert.equal(runtime.view.provideFileDecoration(runtime.view.uri(roots[0]!)), undefined, 'Folders are neutral');
+    assert.equal(runtime.view.provideFileDecoration(sourceUri.with({ scheme: 'agent-context-trace' })), undefined, 'Removed duplicate-tree scheme is not decorated');
     await assert.rejects(invoke({ filePath: path.join(root.directory, '.env') }));
     const configuration = vscode.workspace.getConfiguration('agentContextTrace');
     await configuration.update('excludeGlobs', ['**/source.ts'], vscode.ConfigurationTarget.Global);
@@ -147,39 +141,37 @@ export async function run(): Promise<void> {
     assert.equal(runtime.view.provideFileDecoration(sourceUri)?.badge, 'R');
     await vscode.commands.executeCommand('revealInExplorer', neutralUri);
     await vscode.commands.executeCommand('agentContextTrace.readCoverage.focus');
-    await runtime.view.tree.reveal(source, { select: false, focus: false, expand: true });
     const browser = await chromium.connectOverCDP(`http://127.0.0.1:${process.env.ACT_CDP_PORT}`);
     try {
         const page = browser.contexts().flatMap(context => context.pages()).find(candidate => candidate.url().includes('workbench'));
         assert.ok(page, 'Native VS Code workbench renderer is reachable');
         const section = page.locator('.pane').filter({ has: page.getByText('Agent Read Coverage', { exact: true }) }).first();
         await section.waitFor({ state: 'visible' });
-        const label = section.locator('.monaco-icon-label').filter({ hasText: 'source.ts' }).first();
-        await label.waitFor({ state: 'visible' });
         await page.waitForFunction(() => {
             const pane = Array.from(globalThis.document.querySelectorAll('.pane')).find(element => element.textContent?.includes('Agent Read Coverage'));
-            const target = Array.from(pane?.querySelectorAll('.label-name') ?? []).find(element => element.textContent === 'source.ts');
-            return target && getComputedStyle(target).color === 'rgb(112, 187, 255)';
+            return pane && pane.querySelectorAll('.monaco-list-row').length === 0;
         });
+        assert.equal(await section.getByText('repo-one', { exact: true }).count(), 0, 'No duplicate repository root');
+        assert.equal(await section.getByText('source.ts', { exact: true }).count(), 0, 'No duplicate file listing');
         await page.waitForFunction(() => {
             const target = Array.from(globalThis.document.querySelectorAll('.explorer-folders-view .label-name')).find(element => element.textContent === 'source.ts');
             return target && getComputedStyle(target).color === 'rgb(112, 187, 255)';
         });
-        const colored = await label.evaluate(element => getComputedStyle(element.querySelector('.label-name') ?? element).color);
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-colors-on.png') });
-        await runtime.view.toggle();
-        await page.waitForFunction(previous => {
-            const panes = Array.from(globalThis.document.querySelectorAll('.pane'));
-            const pane = panes.find(element => element.textContent?.includes('Agent Read Coverage'));
-            const target = Array.from(pane?.querySelectorAll('.label-name') ?? []).find(element => element.textContent === 'source.ts');
-            return target && getComputedStyle(target).color !== previous;
-        }, colored);
+        await vscode.commands.executeCommand('agentContextTrace.toggleFileColors');
         await page.waitForFunction(() => {
             const target = Array.from(globalThis.document.querySelectorAll('.explorer-folders-view .label-name')).find(element => element.textContent === 'source.ts');
             return target && getComputedStyle(target).color !== 'rgb(112, 187, 255)';
         });
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-colors-off.png') });
         assert.equal(runtime.view.enabled, false);
+        const details = vscode.commands.executeCommand('agentContextTrace.showDetails', sourceUri);
+        const detailPicker = page.locator('.quick-input-widget');
+        await detailPicker.getByText('Lines 2-3', { exact: true }).waitFor();
+        await page.keyboard.press('Escape');
+        await details;
+        assert.ok(extension.packageJSON.contributes.menus['explorer/context'].some((item: { command: string }) => item.command === 'agentContextTrace.showDetails'));
+        console.log('PASS: coverage section has no duplicate files or folders; Explorer colors, toggle command, and read details remain available');
         const pickerItems = historyPickerItems([
             { file: 'other-old', label: 'Other older chat', workspace: 'another-repo', repositoryMatch: false, updatedAt: '2026-09-10T12:00:00.000Z' },
             { file: 'repo-old', label: 'Repository older chat', workspace: 'repo-one', repositoryMatch: true, updatedAt: '2026-09-01T12:00:00.000Z' },
