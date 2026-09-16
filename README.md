@@ -43,14 +43,16 @@ Supported input is the observed VS Code JSON snapshot or JSONL format with snaps
 
 ## Highlighted File Sections
 
-Open a file in the normal editor after selecting a chat or tracker session. Recorded ranges use blue whole-line shading, a left border, and an overview-ruler marker, with intensity based on read frequency. Hover over a section for its exact count, range, and source-version information. The existing eye toggle shows or hides both filename colors and section highlights.
+Open a file in the normal editor after selecting a chat or tracker session. Recorded ranges use blue whole-line shading, a left border, and an overview-ruler marker, with intensity based on read frequency. Each constant-count section also shows **Read 1 time**, **Read 4 times**, or its exact count beside the code on its first line, so interpreting the shades is optional. Hover over a section for its range and source-version information. The existing eye toggle shows or hides filename colors, section highlights, and count labels together.
+
+Count labels are editor annotations, not inserted source text. They appear after the first line's code with spacing and use the editor's foreground/background colors for contrast over every blue tier. A multi-line section gets one label; when an overlap changes the count, the next section gets its own label. They refresh, clear after stale edits, and restore with the same rules as the shading. On long lines, annotations may require horizontal scrolling or wrapping according to your editor settings.
 
 | Highlight | Meaning |
 |-----------|---------|
 | Light blue | 1 recorded read. |
 | Medium blue | 2-3 recorded reads. |
 | Strong blue | 4-7 recorded reads. |
-| Strongest blue | 8 or more recorded reads. The exact count remains in the tooltip. |
+| Strongest blue | 8 or more recorded reads. The exact count is visible in the label and tooltip. |
 | No shading | Line numbers are absent/invalid, the file is too large, the recorded revision does not match, or highlighting is disabled. Filename colors may still be present. |
 
 The scale is fixed, not relative to the most-read file. Both tracker and saved-chat evidence use the same blue shades at the same counts. On dark themes stronger background opacity makes frequently read sections more prominent; on light themes they appear deeper blue. A short scale legend is shown in Agent Read Coverage. The shade does not imply model understanding, task quality, or that a historical range matches today's contents.
@@ -108,7 +110,7 @@ Browse and open files in the normal Explorer. Right-click a file there and choos
 | `npm run check-types` | Strict TypeScript validation. |
 | `npm run compile` | Compile tests and bundle the extension. |
 | `npm run test:unit` | Sixteen tests covering per-line frequency, inclusive overlaps, tier boundaries, deduplication, large intervals, revision checks, historical line-range formats, workspace association, chat replay/extraction, read-only handling, path scope, persistence, and attribution. |
-| `npm run test:extension` | Four progressively stronger blue tiers, exact-count tooltip, filename totals vs per-line overlaps, refresh deduplication, session isolation, edit invalidation, split editors, shared toggle, grouped picker, history refresh, and restart persistence. |
+| `npm run test:extension` | Four blue tiers, visible count labels with correct placement/contrast and unchanged source, exact-count tooltip, filename totals vs per-line overlaps, deduplication, edit/toggle clearing, grouped picker, history refresh, and restart persistence. |
 | `npm run package` | Produce a self-contained VSIX without runtime npm installation. |
 
 The host test runner downloads VS Code 1.100.0 by default. To use an installed executable in PowerShell, set `$env:VSCODE_EXECUTABLE_PATH` to the full path of its executable before running the test command. Tests use temporary workspaces/profiles, and screenshots are written to the ignored `.vscode-test/screenshots` directory. Only the test windows expose local debugging endpoints; the extension does not start a server.
