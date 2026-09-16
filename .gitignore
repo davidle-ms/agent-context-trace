@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+.npm/
+
+# Build output and extension packages
+out/
+dist/
+*.tsbuildinfo
+*.vsix
+
+# Test artifacts and caches
+.vscode-test/
+.vscode-test-web/
+coverage/
+.nyc_output/
+.eslintcache
+
+# Logs and local environment files
+*.log
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
