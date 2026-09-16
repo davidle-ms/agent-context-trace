@@ -187,13 +187,13 @@ export async function run(): Promise<void> {
             { file: 'repo-new', label: 'Repository newest chat', workspace: 'repo-one', repositoryMatch: true, updatedAt: '2026-09-02T12:00:00.000Z' }
         ]);
         assert.deepEqual(pickerItems.filter(item => item.action === 'select').map(item => item.file), ['repo-new', 'repo-old', 'other-new', 'other-old']);
-        assert.deepEqual(pickerItems.filter(item => item.kind === vscode.QuickPickItemKind.Separator).map(item => item.label), ['This Repository', 'Other Sessions', 'Open History']);
+        assert.deepEqual(pickerItems.filter(item => item.kind === vscode.QuickPickItemKind.Separator).map(item => item.label), ['----- THIS REPOSITORY -----', '----- OTHER SESSIONS -----', 'Open History']);
         assert.deepEqual(historyPickerItems([]).map(item => item.action), ['separator', 'folder', 'file']);
         const choice = vscode.window.showQuickPick(pickerItems, { title: 'Choose Existing Copilot Chat Session', matchOnDetail: true });
         const picker = page.locator('.quick-input-widget');
         await picker.getByText('Repository newest chat', { exact: true }).waitFor();
-        await picker.getByText('This Repository', { exact: true }).waitFor();
-        await picker.getByText('Other Sessions', { exact: true }).waitFor();
+        await picker.getByText('----- THIS REPOSITORY -----', { exact: true }).waitFor();
+        await picker.getByText('----- OTHER SESSIONS -----', { exact: true }).waitFor();
         const displayedChats = await picker.locator('.label-name').allTextContents();
         assert.deepEqual(displayedChats.filter(text => text.endsWith('chat')), ['Repository newest chat', 'Repository older chat', 'Other newest chat', 'Other older chat']);
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'chat-session-groups.png') });

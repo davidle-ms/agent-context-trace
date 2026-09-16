@@ -16,7 +16,7 @@ export function historyPickerItems(entries: readonly HistoryEntry[]): HistoryPic
     const items: HistoryPickerItem[] = [];
     for (const [label, sessions] of [['This Repository', groups.repository], ['Other Sessions', groups.other]] as const) {
         if (!sessions.length) { continue; }
-        items.push({ label, kind: vscode.QuickPickItemKind.Separator, action: 'separator', file: '' });
+        items.push({ label: `----- ${label.toUpperCase()} -----`, kind: vscode.QuickPickItemKind.Separator, action: 'separator', file: '' });
         items.push(...sessions.map(entry => ({ label: entry.label, description: new Date(entry.updatedAt).toLocaleString(),
             detail: `Workspace: ${entry.workspace} | local history (best effort)`, file: entry.file, action: 'select' as const })));
     }
