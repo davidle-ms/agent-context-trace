@@ -1,4 +1,4 @@
 **
-!out/*.js
+!dist/extension.js
 !package.json
 !README.md

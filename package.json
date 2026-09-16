@@ -6,17 +6,190 @@
   "publisher": "davidle-ms",
   "private": true,
   "license": "UNLICENSED",
-  "repository": { "type": "git", "url": "https://github.com/davidle-ms/agent-context-trace.git" },
-  "engines": { "vscode": "^1.100.0" },
-  "categories": ["Other"],
-  "main": "./out/extension.js",
-  "capabilities": {
-    "untrustedWorkspaces": { "supported": false, "description": "Tracked source reads require a trusted local workspace." },
-    "virtualWorkspaces": { "supported": false }
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/davidle-ms/agent-context-trace.git"
   },
-  "activationEvents": [],
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Tracked source reads require a trusted local workspace."
+    },
+    "virtualWorkspaces": {
+      "supported": false
+    }
+  },
+  "activationEvents": [
+    "onLanguageModelTool:read_agent_context"
+  ],
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "id": "agentContextTrace.readCoverage",
+          "name": "Agent Read Coverage",
+          "when": "isWorkspaceTrusted"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "agentContextTrace.start",
+        "title": "Agent Context Trace: Start Session",
+        "icon": "$(play)"
+      },
+      {
+        "command": "agentContextTrace.pauseResume",
+        "title": "Agent Context Trace: Pause / Resume Session"
+      },
+      {
+        "command": "agentContextTrace.stop",
+        "title": "Agent Context Trace: Stop Session",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "agentContextTrace.selectSession",
+        "title": "Agent Context Trace: Select Displayed Session",
+        "icon": "$(history)"
+      },
+      {
+        "command": "agentContextTrace.copyReference",
+        "title": "Agent Context Trace: Copy Session Tool Reference"
+      },
+      {
+        "command": "agentContextTrace.toggleFileColors",
+        "title": "Agent Context Trace: Toggle Read Colors",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "agentContextTrace.showDetails",
+        "title": "Show Recorded Read Details",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "agentContextTrace.export",
+        "title": "Agent Context Trace: Export Selected Session"
+      },
+      {
+        "command": "agentContextTrace.delete",
+        "title": "Agent Context Trace: Delete Selected Session"
+      },
+      {
+        "command": "agentContextTrace.refresh",
+        "title": "Agent Context Trace: Refresh Repository",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "agentContextTrace.start",
+          "when": "view == agentContextTrace.readCoverage",
+          "group": "navigation@1"
+        },
+        {
+          "command": "agentContextTrace.selectSession",
+          "when": "view == agentContextTrace.readCoverage",
+          "group": "navigation@2"
+        },
+        {
+          "command": "agentContextTrace.toggleFileColors",
+          "when": "view == agentContextTrace.readCoverage",
+          "group": "navigation@3"
+        },
+        {
+          "command": "agentContextTrace.refresh",
+          "when": "view == agentContextTrace.readCoverage",
+          "group": "navigation@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "agentContextTrace.showDetails",
+          "when": "view == agentContextTrace.readCoverage && viewItem == recordedFile",
+          "group": "inline"
+        }
+      ]
+    },
+    "colors": [
+      {
+        "id": "agentContextTrace.readFileForeground",
+        "description": "File with a recorded instrumented read in the displayed tracker session.",
+        "defaults": {
+          "light": "#165B9C",
+          "dark": "#70BBFF",
+          "highContrast": "#FFFFFF",
+          "highContrastLight": "#003D80"
+        }
+      }
+    ],
+    "configuration": {
+      "title": "Agent Context Trace",
+      "properties": {
+        "agentContextTrace.excludeGlobs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "maxItems": 100,
+          "default": [],
+          "scope": "machine",
+          "description": "Additional workspace-relative read exclusions. Built-in secret exclusions cannot be disabled. This does not inherit Copilot content exclusions."
+        }
+      }
+    },
+    "languageModelTools": [
+      {
+        "name": "read_agent_context",
+        "toolReferenceName": "agentContextRead",
+        "displayName": "Read File with Context Trace",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(file-code)",
+        "userDescription": "Read numbered workspace lines and record path/range metadata in the specified local tracker session.",
+        "modelDescription": "Read a trusted local workspace text file with line numbers and record read metadata in Agent Context Trace. Use only when the user supplies a tracker session ID. You MUST pass that exact sessionId. Does not capture other tools or identify Copilot sessions. Requires explicit positive inclusive startLine/endLine, up to 500 lines, text under 1 MiB, and a non-excluded absolute local file path. If blocked, explain the issue; do not use a different tool to bypass the exclusion.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sessionId",
+            "filePath",
+            "startLine",
+            "endLine"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "description": "Exact tracker session UUID supplied by the user."
+            },
+            "filePath": {
+              "type": "string",
+              "description": "Absolute path to a local workspace text file."
+            },
+            "startLine": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "First line, 1-based inclusive."
+            },
+            "endLine": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Last line, 1-based inclusive; at most 500 requested lines."
+            }
+          }
+        }
+      }
+    ]
+  },
   "scripts": {
-    "compile": "tsc -p .",
+    "compile": "tsc -p . && esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --outfile=dist/extension.js",
     "check-types": "tsc -p . --noEmit",
     "watch": "tsc -w -p .",
     "test:unit": "npm run compile && node --test out/test/core.test.js",
@@ -29,6 +202,9 @@
     "@types/vscode": "1.100.0",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.28.2",
+    "minimatch": "^10.2.6",
+    "playwright-core": "^1.63.0",
     "typescript": "~5.9.3"
   }
 }
