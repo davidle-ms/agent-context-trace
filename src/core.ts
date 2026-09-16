@@ -39,6 +39,31 @@ export function hash(text: string): string {
     return createHash('sha256').update(text).digest('hex');
 }
 
+export interface ReadRange { startLine: number; endLine: number }
+export interface HighlightEvidence { startLine?: number; endLine?: number; snapshotHash?: string }
+
+export function readHighlightRanges(events: readonly HighlightEvidence[], snapshotHash: string, lineCount: number, allowUnverified: boolean): { verified: ReadRange[]; unverified: ReadRange[] } {
+    const verified: ReadRange[] = [];
+    const unverified: ReadRange[] = [];
+    for (const event of events) {
+        const { startLine, endLine } = event;
+        if (startLine === undefined || endLine === undefined || !Number.isSafeInteger(startLine) || !Number.isSafeInteger(endLine)
+            || startLine < 1 || endLine < startLine || endLine > lineCount) { continue; }
+        if (event.snapshotHash === snapshotHash) { verified.push({ startLine, endLine }); }
+        else if (event.snapshotHash === undefined && allowUnverified) { unverified.push({ startLine, endLine }); }
+    }
+    const merge = (ranges: ReadRange[]): ReadRange[] => {
+        const merged: ReadRange[] = [];
+        for (const range of ranges.sort((left, right) => left.startLine - right.startLine)) {
+            const previous = merged.at(-1);
+            if (previous && range.startLine <= previous.endLine + 1) { previous.endLine = Math.max(previous.endLine, range.endLine); }
+            else { merged.push({ ...range }); }
+        }
+        return merged;
+    };
+    return { verified: merge(verified), unverified: merge(unverified) };
+}
+
 export function isWithin(root: string, candidate: string): boolean {
     const relative = path.relative(root, candidate);
     return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));

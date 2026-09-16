@@ -174,11 +174,13 @@ export function extractHistory(snapshot: JsonObject, roots: readonly Root[]): Hi
         const message = object(tool.pastTenseMessage) ? tool.pastTenseMessage : tool.invocationMessage;
         if (!object(message) || typeof message.value !== 'string') { session.unmappedCalls++; continue; }
         const files = new Map<string, HistoryRead>();
-        for (const match of message.value.matchAll(/\]\((file:\/\/[^\s)]+)\)/g)) {
+        const links = [...message.value.matchAll(/\]\((file:\/\/[^\s)]+)\)/g)];
+        const statedRange = links.length === 1 ? /,\s*lines (\d+) to (\d+)\s*$/i.exec(message.value) : null;
+        for (const match of links) {
             try {
                 const uri = new URL(match[1]!);
                 if (uri.hostname && uri.hostname !== 'localhost') { continue; }
-                const range = /^#L(\d+)(?:-L?(\d+))?$/.exec(uri.hash);
+                const range = statedRange ?? /^#L(\d+)(?:-L?(\d+))?$/.exec(uri.hash);
                 const filePath = fileURLToPath(uri);
                 const root = roots.find(candidate => isWithin(candidate.directory, filePath));
                 if (!root) { continue; }

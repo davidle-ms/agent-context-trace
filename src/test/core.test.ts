@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
-import { excluded, hash, isWithin, parseSession, ReadEvent, resolveFile, sliceRead, summary, TraceStore, validateInput } from '../core';
+import { excluded, hash, isWithin, parseSession, ReadEvent, resolveFile, sliceRead, summary, TraceStore, validateInput, readHighlightRanges } from '../core';
 import { pathToFileURL } from 'node:url';
 import { extractHistory, replayHistory, readHistory, listHistory, historyStatus, groupHistory, HistoryEntry } from '../history';
 
@@ -206,4 +206,42 @@ test('chat listing associates saved single and multi-root workspaces without tit
         const fallback = await listHistory([missing], roots, missing);
         assert.equal(fallback[0]?.repositoryMatch, true, 'Current profile storage maps even when workspace.json is absent');
     } finally { await fs.rm(temporary, { recursive: true, force: true }); }
+});
+
+test('history preserves stated line sections instead of treating navigation anchors as read ranges', () => {
+    const directory = path.resolve('fixture');
+    const root = { id: hash('history-root'), directory, name: 'fixture' };
+    const uri = pathToFileURL(path.join(directory, 'source.ts')).toString();
+    const messages = [
+        `Read [file](${uri}#105-105), lines 105 to 181`,
+        `Read [file](${uri}#105-105)`,
+        `Read [file](${uri}#L5-L8)`,
+        `Read [file](${uri}), lines 10 to 5`,
+        `Read [file](${uri}), lines 0 to 5`,
+        `Read [file](${uri}) and [file](${uri}), lines 2 to 3`
+    ];
+    const session = extractHistory({ sessionId: 'line-ranges', requests: [{ response: messages.map((value, index) => ({
+        kind: 'toolInvocationSerialized', toolId: 'copilot_readFile', toolCallId: `read-${index}`, isComplete: true,
+        isConfirmed: { type: 1 }, pastTenseMessage: { value }
+    })) }] }, [root]);
+    assert.deepEqual(session.events.map(event => [event.startLine, event.endLine]), [
+        [105, 181], [undefined, undefined], [5, 8], [undefined, undefined], [undefined, undefined], [undefined, undefined]
+    ]);
+});
+
+test('editor highlights merge known ranges and distinguish missing or stale source revisions', () => {
+    const events = [
+        { startLine: 2, endLine: 4, snapshotHash: 'current' },
+        { startLine: 4, endLine: 6, snapshotHash: 'current' },
+        { startLine: 8, endLine: 8, snapshotHash: 'current' },
+        { startLine: 1, endLine: 5, snapshotHash: 'old' },
+        { startLine: 9, endLine: 10 }, {}, { startLine: 0, endLine: 1 },
+        { startLine: 3, endLine: 20 }, { startLine: 5, endLine: 2 }, { startLine: 1.5, endLine: 2 }
+    ];
+    const before = structuredClone(events);
+    assert.deepEqual(readHighlightRanges(events, 'current', 10, true), {
+        verified: [{ startLine: 2, endLine: 6 }, { startLine: 8, endLine: 8 }], unverified: [{ startLine: 9, endLine: 10 }]
+    });
+    assert.deepEqual(readHighlightRanges(events, 'changed', 10, false), { verified: [], unverified: [] });
+    assert.deepEqual(events, before);
 });

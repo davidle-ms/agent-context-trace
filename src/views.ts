@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import { Root, ReadEvent, Session, summary, TraceStore, resolveFile, hash } from './core';
+import { Root, ReadEvent, Session, summary, TraceStore, resolveFile, hash, MAX_FILE_BYTES, readHighlightRanges, ReadRange } from './core';
 import { HistoryRead, HistorySession, historyStatus, HistoryEntry, groupHistory } from './history';
 
 export interface HistoryPickerItem extends vscode.QuickPickItem {
@@ -36,12 +36,38 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
     private history: HistorySession | undefined;
     private index = new Map<string, (ReadEvent | HistoryRead)[]>();
     private fileUris = new Map<string, vscode.Uri>();
+    private readonly verifiedSections: vscode.TextEditorDecorationType;
+    private readonly unverifiedSections: vscode.TextEditorDecorationType;
+    private highlightSessionId: string | undefined;
+    private editedHistoryDocuments = new WeakSet<vscode.TextDocument>();
+    private readonly documentHashes = new WeakMap<vscode.TextDocument, { version: number; hash: string }>();
     enabled: boolean;
 
     constructor(private readonly context: vscode.ExtensionContext, private readonly store: TraceStore, private readonly roots: readonly Root[]) {
         this.enabled = context.workspaceState.get('fileColorsEnabled', true);
         this.tree = vscode.window.createTreeView('agentContextTrace.readCoverage', { treeDataProvider: this });
         this.disposables.push(this.tree, this.changed, this.decorated, vscode.window.registerFileDecorationProvider(this));
+        const sectionStyle = (prefix: string): vscode.DecorationRenderOptions => ({
+            isWholeLine: true,
+            backgroundColor: new vscode.ThemeColor(`${prefix}Background`),
+            borderColor: new vscode.ThemeColor(`${prefix}Border`),
+            borderStyle: 'solid', borderWidth: '0 0 0 2px',
+            overviewRulerColor: new vscode.ThemeColor(`${prefix}Border`),
+            overviewRulerLane: vscode.OverviewRulerLane.Right,
+            rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed
+        });
+        this.verifiedSections = vscode.window.createTextEditorDecorationType(sectionStyle('agentContextTrace.readSection'));
+        this.unverifiedSections = vscode.window.createTextEditorDecorationType(sectionStyle('agentContextTrace.unverifiedSection'));
+        this.disposables.push(this.verifiedSections, this.unverifiedSections,
+            vscode.window.onDidChangeVisibleTextEditors(() => this.refreshEditorHighlights()),
+            vscode.workspace.onDidChangeTextDocument(event => {
+                if (!event.contentChanges.length) { return; }
+                this.editedHistoryDocuments.add(event.document);
+                this.refreshEditorHighlights();
+            }),
+            vscode.workspace.onDidChangeConfiguration(event => {
+                if (event.affectsConfiguration('agentContextTrace.showUnverifiedHistoryRanges')) { this.refreshEditorHighlights(); }
+            }));
     }
 
     restoreSelection(): void {
@@ -78,6 +104,10 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
 
     refresh(): void {
         const session = this.selected();
+        if (session?.id !== this.highlightSessionId) {
+            this.highlightSessionId = session?.id;
+            this.editedHistoryDocuments = new WeakSet();
+        }
         const affectedFiles = new Map(this.fileUris);
         this.fileUris.clear();
         this.index.clear();
@@ -95,10 +125,46 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
         }
         this.tree.description = `${session?.label ?? 'No session selected'} | Colors ${this.enabled ? 'on' : 'off'}`;
         this.tree.message = session?.coverage === 'copilot-history-read-metadata' ? historyStatus(session) : 'Instrumented reads only';
+        if (session?.coverage === 'copilot-history-read-metadata' && session.events.length) {
+            this.tree.message += session.events.some(event => event.startLine !== undefined && event.endLine !== undefined)
+                ? '\nAmber sections: source revision unverified.' : '\nSection highlights unavailable: no line ranges saved.';
+        }
         this.tree.badge = { value: this.index.size, tooltip: 'Files with recorded reads in the selected tracker session' };
         void vscode.commands.executeCommand('setContext', 'agentContextTrace.fileColorsEnabled', this.enabled);
         this.decorated.fire([...affectedFiles.values()]);
+        this.refreshEditorHighlights();
         this.changed.fire();
+    }
+
+    editorHighlights(document: vscode.TextDocument): { verified: ReadRange[]; unverified: ReadRange[] } {
+        const empty = { verified: [], unverified: [] };
+        if (!this.enabled || document.uri.scheme !== 'file' || document.isClosed) { return empty; }
+        const events = this.index.get(this.fileKey(document.uri));
+        if (!events?.length || document.offsetAt(new vscode.Position(document.lineCount, 0)) > MAX_FILE_BYTES) { return empty; }
+        const cached = this.documentHashes.get(document);
+        let snapshotHash = cached?.version === document.version ? cached.hash : undefined;
+        if (!snapshotHash) {
+            const text = document.getText();
+            if (Buffer.byteLength(text, 'utf8') > MAX_FILE_BYTES) { return empty; }
+            snapshotHash = hash(text);
+            this.documentHashes.set(document, { version: document.version, hash: snapshotHash });
+        }
+        const allowUnverified = vscode.workspace.getConfiguration('agentContextTrace').get('showUnverifiedHistoryRanges', true)
+            && !document.isDirty && !this.editedHistoryDocuments.has(document);
+        return readHighlightRanges(events, snapshotHash, document.lineCount, allowUnverified);
+    }
+
+    private refreshEditorHighlights(): void {
+        for (const editor of vscode.window.visibleTextEditors) {
+            const ranges = this.editorHighlights(editor.document);
+            const decorate = (items: ReadRange[], verified: boolean): vscode.DecorationOptions[] => items.map(item => ({
+                range: new vscode.Range(item.startLine - 1, 0, item.endLine - 1, editor.document.lineAt(item.endLine - 1).text.length),
+                hoverMessage: verified ? `Recorded read: lines ${item.startLine}-${item.endLine}. Source revision matches this document.`
+                    : `Unverified historical range: lines ${item.startLine}-${item.endLine}. Copilot saved no source revision; these current lines may differ from the lines read.`
+            }));
+            editor.setDecorations(this.verifiedSections, decorate(ranges.verified, true));
+            editor.setDecorations(this.unverifiedSections, decorate(ranges.unverified, false));
+        }
     }
 
     getChildren(): never[] { return []; }
@@ -128,7 +194,7 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
         const document = await vscode.workspace.openTextDocument(vscode.Uri.file(resolved.filePath));
         if (!('snapshotHash' in selected.event)) {
             await vscode.window.showTextDocument(document);
-            void vscode.window.showInformationMessage('This chat history has no source revision. Historical lines were not highlighted.');
+            void vscode.window.showInformationMessage('This chat history has no source revision. Amber shading, when available, is an unverified range guide; no text selection was applied.');
             return;
         }
         if (hash(document.getText()) !== selected.event.snapshotHash) {

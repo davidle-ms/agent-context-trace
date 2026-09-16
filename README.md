@@ -1,10 +1,10 @@
 # Agent Context Trace
 
-A VS Code extension that colors filename text in the built-in **Explorer** from a selected Copilot chat's recorded reads. **Agent Read Coverage** contains session controls and status only, with no duplicate file tree. Toggle the colors without stopping history refresh or optional tracker recording.
+A VS Code extension that colors filenames in the built-in **Explorer** and highlights recorded line sections inside open editors. **Agent Read Coverage** contains session controls and status only, with no duplicate file tree. The eye toggle controls both surfaces without stopping history refresh or optional tracker recording.
 
 ## Preview Status
 
-The preview includes an existing Copilot chat picker, a read-only local-history adapter, built-in Explorer decorations, and a persistent color toggle. Explicit instrumented tracker sessions remain available as an optional fallback. This is not a complete observer of all Copilot activity.
+The preview includes an existing Copilot chat picker, a read-only local-history adapter, built-in Explorer and editor-section decorations, and a persistent color toggle. Explicit instrumented tracker sessions remain available as an optional fallback. This is not a complete observer of all Copilot activity.
 
 **Existing chat mode** recognizes supported completed/confirmed `copilot_readFile` entries in saved VS Code chat history. It does not require starting a tracker or using `#agentContextRead`. **Tracker mode** records only reads through that contributed tool. Neither mode infers reads from file visibility, search results, terminal commands, or prompt attachments. A colored file means recorded evidence exists at that path, not that the whole file or current revision was read or understood.
 
@@ -37,9 +37,25 @@ Grouping uses VS Code's saved workspace association, not chat titles or incident
 
 The full-width horizontal line between the last repository chat and the first other chat is a native Quick Pick group border. For more contrast, add `"pickerGroup.border": "#8594A6"` to `workbench.colorCustomizations` in the desired VS Code profile. This colors all Quick Pick group borders in that profile, not only this boundary; thickness is controlled by VS Code. The extension does not change theme settings automatically. Group names stay plain, without decorative dashes. The native UI test temporarily applies this color in its isolated test profile, checks the actual border's position and width, and restores the setting afterward.
 
-Supported input is the observed VS Code JSON snapshot or JSONL format with snapshot, replacement, and array-append records. Inputs are limited to 32 MiB and 10,000 mapped reads; other formats fail visibly rather than invent coverage. Only explicit file links in supported read-tool entries produce markers. Missing range/revision metadata is shown as unavailable; the extension does not hash today's file and claim it is the historical revision. It does not highlight unverifiable historical ranges. A chat with no supported reads leaves files neutral, which does not prove they were never read.
+Supported input is the observed VS Code JSON snapshot or JSONL format with snapshot, replacement, and array-append records. Inputs are limited to 32 MiB and 10,000 mapped reads; other formats fail visibly rather than invent coverage. Only explicit file links in supported read-tool entries produce filename markers. Line ranges are extracted from `#L2-L5` links or an explicit single-file message ending in `lines 2 to 5`. A numeric navigation anchor alone is not treated as a read section. Missing metadata stays unknown; the extension never hashes today's file and claims it is the historical revision. A chat with no supported reads leaves files neutral, which does not prove they were never read.
 
 **Delete Tracker / Disconnect Chat History** disconnects an existing chat selection without deleting the original chat. Selecting a different chat replaces the colors, rather than combining unrelated sessions.
+
+## Highlighted File Sections
+
+Open a file in the normal editor after selecting a chat or tracker session. Recorded ranges appear automatically as whole-line shading with a left border and overview-ruler marker. Hover over a section for its range and evidence type. The existing eye toggle shows or hides both filename colors and section highlights.
+
+| Highlight | Meaning |
+|-----------|---------|
+| Blue | The read has a snapshot fingerprint that matches the current document, as provided by instrumented tracker reads. |
+| Amber | Copilot history retained explicit line numbers but no source revision. This is an **unverified historical range guide**: the current text at those lines may differ from what the agent read. |
+| No shading | Line numbers are absent/invalid, the file is too large, the recorded revision does not match, or highlighting is disabled. Filename colors may still be present. |
+
+Adjacent/overlapping ranges of the same evidence type are merged; unrelated lines are not shaded. Out-of-bounds ranges are skipped, not silently reassigned to other lines. Editing a document clears stale verified highlights; they can return when the content again matches the recorded fingerprint. Historical guides are suppressed for dirty buffers and after edits observed while that session is selected. Switching away and back to a history session resets this observation guard, but its guides remain explicitly unverified.
+
+Disable `agentContextTrace.showUnverifiedHistoryRanges` to show only revision-verified sections. The default is `true` so saved-chat ranges can be inspected with the amber warning. Theme colors are `agentContextTrace.readSectionBackground`, `agentContextTrace.readSectionBorder`, `agentContextTrace.unverifiedSectionBackground`, and `agentContextTrace.unverifiedSectionBorder`.
+
+Only visible local editors with matching recorded paths are processed, including split panes. Document fingerprints are cached by document version in memory, are not persisted for history guides, and are bounded to 1 MiB. Opening files or updating decorations never generates agent-read events or modifies source. The absence of section highlights is not proof that the agent did not read that section.
 
 ## Optional Instrumented Tracker
 
@@ -61,7 +77,7 @@ Do not bypass the tool's exclusions using another tool.
 
 Use **Pause / Resume Session** or **Stop Session** to control tracker recording separately. Use **Select Tracker History** for previously recorded tracker sessions; displaying a session does not change which tracker is recording. Sessions from a previous process do not automatically resume. A tracker still marked recording/paused is shown as "other window or interrupted" because this preview cannot safely identify whether its owner is still running.
 
-Browse and open files in the normal Explorer. Right-click a file there and choose **Show Recorded Read Details** to inspect its ranges, timestamps, and revisions. The same command in the Command Palette uses the active editor's file. Files without recorded reads show a brief informational message. Selecting a range highlights it only if the current document fingerprint matches; otherwise the file opens with a stale-revision warning. These are explicit navigation selections, not a continuous editor heatmap.
+Browse and open files in the normal Explorer. Right-click a file there and choose **Show Recorded Read Details** to inspect its ranges, timestamps, and revisions. The same command in the Command Palette uses the active editor's file. Files without recorded reads show a brief informational message. Choosing a range makes a text selection only if the document fingerprint matches; otherwise the file opens with a warning. Automatic section shading is independent of the cursor selection and follows the evidence rules above.
 
 ## Privacy and Limits
 
@@ -83,8 +99,8 @@ Browse and open files in the normal Explorer. Right-click a file there and choos
 |---------|---------|
 | `npm run check-types` | Strict TypeScript validation. |
 | `npm run compile` | Compile tests and bundle the extension. |
-| `npm run test:unit` | Thirteen tests covering saved workspace association, per-group recent-first ordering/limits, chat-history replay/extraction, live read-count feedback, read-only handling, range semantics, path scope, metrics, persistence failures, and tracker attribution. |
-| `npm run test:extension` | No duplicate file/folder rows in coverage, Explorer read-details command, native chat picker sections and ordering, existing-chat refresh, Explorer colors/screenshots, toggle, session restoration, and normal-window restart tests. |
+| `npm run test:unit` | Fifteen tests covering historical line-range formats, highlight merging/revision checks, workspace association, chat replay/extraction, read-only handling, range semantics, path scope, metrics, persistence, and attribution. |
+| `npm run test:extension` | Actual editor section rendering and position, amber guides and opt-out, stale-edit clearing, split editors, shared eye toggle, missing ranges, Explorer colors, grouped picker, history refresh, and restart persistence. |
 | `npm run package` | Produce a self-contained VSIX without runtime npm installation. |
 
 The host test runner downloads VS Code 1.100.0 by default. To use an installed executable in PowerShell, set `$env:VSCODE_EXECUTABLE_PATH` to the full path of its executable before running the test command. Tests use temporary workspaces/profiles, and screenshots are written to the ignored `.vscode-test/screenshots` directory. Only the test windows expose local debugging endpoints; the extension does not start a server.
@@ -95,4 +111,4 @@ Tests use synthetic Copilot history fixtures and direct adapter calls. The histo
 
 ## Remaining Work
 
-The [implementation plan](docs/IMPLEMENTATION-PLAN.md) describes the larger target. Remaining work includes authenticated Copilot acceptance and policy review, minimum-version and cross-platform checks, cross-session analytics, continuous editor highlights, rejected-call history, robust interrupted-session cleanup, a global disk budget, large-repository performance testing, and CI/release automation. The initial view uses a single toggle icon; separate state-specific menu labels are also planned.
+The [implementation plan](docs/IMPLEMENTATION-PLAN.md) describes the larger target. Remaining work includes authenticated Copilot acceptance and policy review, minimum-version and cross-platform checks, cross-session analytics, rejected-call history, robust interrupted-session cleanup, a global disk budget, large-repository performance testing, and CI/release automation. The view retains the header eye toggle.
