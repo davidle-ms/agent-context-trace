@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { test } from 'node:test';
 import { excluded, hash, isWithin, parseSession, ReadEvent, resolveFile, sliceRead, summary, TraceStore, validateInput } from '../core';
 import { pathToFileURL } from 'node:url';
-import { extractHistory, replayHistory, readHistory, listHistory, historyStatus } from '../history';
+import { extractHistory, replayHistory, readHistory, listHistory, historyStatus, groupHistory, HistoryEntry } from '../history';
 
 const input = { sessionId: randomUUID(), filePath: '/workspace/source.ts', startLine: 1, endLine: 3 };
 const event = (startLine = 1, endLine = 10): ReadEvent => ({ id: randomUUID(), rootId: hash('root'), relativePath: 'source.ts',
@@ -152,4 +152,58 @@ test('chat status distinguishes unsaved read evidence from unmapped entries and 
     assert.match(historyStatus(session), /1 recorded read in this repository/);
     session.events.push({ id: 'read-2', rootId: hash('root'), relativePath: 'other.ts' });
     assert.match(historyStatus(session), /2 recorded reads in this repository/);
+});
+
+test('repository chats precede newer remaining chats with independent recent-first limits', () => {
+    const entries: HistoryEntry[] = Array.from({ length: 105 }, (_, index) => ({ file: `other-${index}`, label: 'Other chat', workspace: 'other',
+        updatedAt: new Date(200000 + index * 1000).toISOString(), repositoryMatch: false }));
+    const oldRepo = { file: 'repo-old', label: 'Repository chat', workspace: 'repo', updatedAt: new Date(1000).toISOString(), repositoryMatch: true };
+    const newRepo = { ...oldRepo, file: 'repo-new', updatedAt: new Date(2000).toISOString() };
+    entries.push(oldRepo, newRepo);
+    const original = [...entries];
+    const result = groupHistory(entries);
+    assert.deepEqual(result.repository.map(entry => entry.file), ['repo-new', 'repo-old']);
+    assert.equal(result.other.length, 100);
+    assert.equal(result.other[0]?.file, 'other-104');
+    assert.deepEqual(entries, original, 'Grouping does not mutate input');
+    assert.deepEqual(groupHistory([]), { repository: [], other: [] });
+});
+
+test('chat listing associates saved single and multi-root workspaces without title or path-prefix guesses', async () => {
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'act-chat-groups-'));
+    try {
+        const repo = path.join(temporary, 'repo with spaces');
+        await fs.mkdir(repo);
+        const roots = [{ id: hash('root'), directory: repo, name: 'repo with spaces' }];
+        const folders: string[] = [];
+        const fixture = async (name: string, metadata?: unknown): Promise<string> => {
+            const folder = path.join(temporary, 'storage', name, 'chatSessions');
+            await fs.mkdir(folder, { recursive: true });
+            if (metadata) { await fs.writeFile(path.join(path.dirname(folder), 'workspace.json'), JSON.stringify(metadata)); }
+            await fs.writeFile(path.join(folder, `${name}.jsonl`), JSON.stringify({ kind: 0, v: { customTitle: 'Identical title', sessionId: name, requests: [] } }) + '\n');
+            folders.push(folder);
+            return folder;
+        };
+        const single = await fixture('single', { folder: pathToFileURL(repo + path.sep).toString() });
+        const multiFile = path.join(temporary, 'project.code-workspace');
+        await fs.writeFile(multiFile, '// VS Code workspace with comments and trailing commas\n{"folders":[{"path":"repo with spaces"},],}');
+        await fixture('multi', { workspace: pathToFileURL(multiFile).toString() });
+        const uriFile = path.join(temporary, 'uri.code-workspace');
+        await fs.writeFile(uriFile, JSON.stringify({ folders: [{ uri: pathToFileURL(repo).toString() }] }));
+        await fixture('uri', { workspace: pathToFileURL(uriFile).toString() });
+        await fixture('sibling', { folder: pathToFileURL(repo + '-other').toString() });
+        await fixture('parent', { folder: pathToFileURL(temporary).toString() });
+        await fixture('remote', { folder: 'vscode-remote://ssh-remote+server/repo' });
+        const missing = await fixture('missing');
+        const corrupt = await fixture('corrupt');
+        await fs.writeFile(path.join(path.dirname(corrupt), 'workspace.json'), '{bad');
+        if (process.platform === 'win32') { await fixture('casing', { folder: pathToFileURL(repo.toUpperCase()).toString() }); }
+        const entries = await listHistory(folders, roots);
+        const matched = entries.filter(entry => entry.repositoryMatch).map(entry => path.basename(entry.file, '.jsonl')).sort();
+        assert.deepEqual(matched, process.platform === 'win32' ? ['casing', 'multi', 'single', 'uri'] : ['multi', 'single', 'uri']);
+        assert.equal(entries.find(entry => entry.file === path.join(single, 'single.jsonl'))?.workspace, 'repo with spaces');
+        assert.equal(entries.find(entry => entry.file === path.join(corrupt, 'corrupt.jsonl'))?.workspace, 'Unknown workspace');
+        const fallback = await listHistory([missing], roots, missing);
+        assert.equal(fallback[0]?.repositoryMatch, true, 'Current profile storage maps even when workspace.json is absent');
+    } finally { await fs.rm(temporary, { recursive: true, force: true }); }
 });

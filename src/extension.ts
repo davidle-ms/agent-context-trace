@@ -6,7 +6,7 @@ import * as os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { minimatch } from 'minimatch';
 import { hash, ReadInput, Root, resolveFile, sliceRead, TOOL_NAME, TraceStore, validateInput } from './core';
-import { CoverageView, FileNode } from './views';
+import { CoverageView, FileNode, historyPickerItems } from './views';
 import { HistorySession, listHistory, readHistory } from './history';
 
 let running: Runtime | undefined;
@@ -162,7 +162,7 @@ export class Runtime {
             : process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support')
             : process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config');
         if (base) { stores.add(path.join(base, product, 'User', 'workspaceStorage')); }
-        const folders: string[] = [];
+        const folders: string[] = this.context.storageUri ? [path.join(path.dirname(this.context.storageUri.fsPath), 'chatSessions')] : [];
         for (const store of stores) {
             const workspaces = await fs.readdir(store, { withFileTypes: true }).catch(() => []);
             for (const workspace of workspaces.filter(entry => entry.isDirectory()).slice(0, 200)) {
@@ -183,14 +183,16 @@ export class Runtime {
             await this.context.workspaceState.update('copilotHistoryConsent', true);
         }
         const entries = await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Loading local Copilot chats' },
-            async () => listHistory(await this.historyFolders()));
-        const picked = await vscode.window.showQuickPick([
-            ...entries.map(entry => ({ label: entry.label, description: entry.updatedAt.slice(0, 16).replace('T', ' '),
-                detail: `Workspace ${entry.workspace} | local history (best effort)`, file: entry.file, action: 'select' })),
-            { label: 'Browse a chat history folder...', detail: 'Choose a chatSessions folder from another workspace or VS Code profile.', action: 'folder', file: '' },
-            { label: 'Open a chat JSON or JSONL file...', detail: 'Read one explicitly selected history file.', action: 'file', file: '' }
-        ], { title: 'Choose Existing Copilot Chat Session', placeHolder: entries.length ? 'Most recent 100 saved chats; only files in this repository will be colored' : 'No local chats found. Choose a history folder or file.', matchOnDetail: true });
-        if (!picked) { return; }
+            async () => listHistory(await this.historyFolders(), this.roots,
+                this.context.storageUri ? path.join(path.dirname(this.context.storageUri.fsPath), 'chatSessions') : undefined));
+        const picked = await vscode.window.showQuickPick(historyPickerItems(entries), {
+            title: 'Choose Existing Copilot Chat Session',
+            placeHolder: !entries.length ? 'No local chats found. Choose a history folder or file.'
+                : entries.some(entry => entry.repositoryMatch) ? 'This repository first, then other sessions; newest first in each group'
+                : 'No chats matched this repository. Other sessions are listed newest first.',
+            matchOnDetail: true
+        });
+        if (!picked || picked.action === 'separator') { return; }
         if (picked.action === 'folder') {
             const selected = await vscode.window.showOpenDialog({ title: 'Select Copilot chatSessions Folder', canSelectFiles: false, canSelectFolders: true, canSelectMany: false });
             if (selected?.[0]?.scheme === 'file') {

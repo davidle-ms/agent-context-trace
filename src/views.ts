@@ -2,9 +2,31 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { minimatch } from 'minimatch';
 import { Root, ReadEvent, Session, summary, TraceStore, VIEW_SCHEME, resolveFile, hash } from './core';
-import { HistoryRead, HistorySession, historyStatus } from './history';
+import { HistoryRead, HistorySession, historyStatus, HistoryEntry, groupHistory } from './history';
 
 export interface FileNode { rootId: string; relativePath: string; directory: boolean; name: string }
+
+export interface HistoryPickerItem extends vscode.QuickPickItem {
+    file: string;
+    action: 'select' | 'folder' | 'file' | 'separator';
+}
+
+export function historyPickerItems(entries: readonly HistoryEntry[]): HistoryPickerItem[] {
+    const groups = groupHistory(entries);
+    const items: HistoryPickerItem[] = [];
+    for (const [label, sessions] of [['This Repository', groups.repository], ['Other Sessions', groups.other]] as const) {
+        if (!sessions.length) { continue; }
+        items.push({ label, kind: vscode.QuickPickItemKind.Separator, action: 'separator', file: '' });
+        items.push(...sessions.map(entry => ({ label: entry.label, description: new Date(entry.updatedAt).toLocaleString(),
+            detail: `Workspace: ${entry.workspace} | local history (best effort)`, file: entry.file, action: 'select' as const })));
+    }
+    items.push(
+        { label: 'Open History', kind: vscode.QuickPickItemKind.Separator, action: 'separator', file: '' },
+        { label: 'Browse a chat history folder...', detail: 'Choose a chatSessions folder from another workspace or VS Code profile.', action: 'folder', file: '' },
+        { label: 'Open a chat JSON or JSONL file...', detail: 'Read one explicitly selected history file.', action: 'file', file: '' }
+    );
+    return items;
+}
 
 export class CoverageView implements vscode.TreeDataProvider<FileNode>, vscode.FileDecorationProvider, vscode.Disposable {
     private readonly changed = new vscode.EventEmitter<void>();

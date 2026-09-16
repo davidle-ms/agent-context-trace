@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse, ParseError } from 'jsonc-parser';
 import { excluded, isWithin, Root } from './core';
 
 export const MAX_HISTORY_BYTES = 32 * 1024 * 1024;
@@ -27,7 +28,65 @@ export interface HistorySession {
     recognizedCalls: number;
     unmappedCalls: number;
 }
-export interface HistoryEntry { file: string; label: string; updatedAt: string; workspace: string }
+export interface HistoryEntry { file: string; label: string; updatedAt: string; workspace: string; repositoryMatch: boolean }
+
+export function groupHistory(entries: readonly HistoryEntry[]): { repository: HistoryEntry[]; other: HistoryEntry[] } {
+    const recent = [...entries].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.file.localeCompare(right.file));
+    return {
+        repository: recent.filter(entry => entry.repositoryMatch).slice(0, 100),
+        other: recent.filter(entry => !entry.repositoryMatch).slice(0, 100)
+    };
+}
+
+async function readWorkspaceMetadata(file: string): Promise<JsonObject | undefined> {
+    const handle = await fs.open(file, 'r').catch(() => undefined);
+    if (!handle) { return; }
+    try {
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.size > MAX_HEADER_BYTES) { return; }
+        const buffer = Buffer.alloc(stat.size);
+        let offset = 0;
+        while (offset < buffer.length) {
+            const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+            if (!bytesRead) { break; }
+            offset += bytesRead;
+        }
+        const errors: ParseError[] = [];
+        const metadata: unknown = parse(buffer.subarray(0, offset).toString('utf8'), errors, { allowTrailingComma: true });
+        if (!errors.length && object(metadata)) { return metadata; }
+    } catch { return; } finally { await handle.close(); }
+}
+
+function localFilePath(value: unknown): string | undefined {
+    if (typeof value !== 'string') { return; }
+    try {
+        const uri = new URL(value);
+        if (uri.protocol !== 'file:' || uri.hostname) { return; }
+        const directory = fileURLToPath(uri);
+        return /^[\\/]{2}/.test(directory) ? undefined : directory;
+    } catch { return; }
+}
+
+async function workspaceAssociation(folder: string): Promise<{ directories: string[]; label: string }> {
+    const metadata = await readWorkspaceMetadata(path.join(path.dirname(folder), 'workspace.json'));
+    const directory = localFilePath(metadata?.folder);
+    if (directory) { return { directories: [directory], label: path.basename(directory) || directory }; }
+    const workspaceFile = localFilePath(metadata?.workspace);
+    if (workspaceFile) {
+        const workspace = await readWorkspaceMetadata(workspaceFile);
+        const directories: string[] = [];
+        if (Array.isArray(workspace?.folders)) {
+            for (const entry of workspace.folders) {
+                if (!object(entry)) { continue; }
+                const candidate = typeof entry.path === 'string' && !/^[\\/]{2}/.test(entry.path)
+                    ? path.resolve(path.dirname(workspaceFile), entry.path) : localFilePath(entry.uri);
+                if (candidate) { directories.push(candidate); }
+            }
+        }
+        return { directories, label: path.basename(workspaceFile) };
+    }
+    return { directories: [], label: 'Unknown workspace' };
+}
 
 export function historyStatus(session: HistorySession): string {
     const count = session.events.length;
@@ -160,20 +219,39 @@ export async function readHistory(file: string, roots: readonly Root[]): Promise
     } finally { await handle.close(); }
 }
 
-export async function listHistory(folders: readonly string[]): Promise<HistoryEntry[]> {
+export async function listHistory(folders: readonly string[], roots: readonly Root[] = [], currentHistoryFolder?: string): Promise<HistoryEntry[]> {
+    const canonicalPaths = new Map<string, Promise<string>>();
+    const canonical = (directory: string): Promise<string> => {
+        const normalized = path.resolve(directory);
+        let result = canonicalPaths.get(normalized);
+        if (!result) {
+            result = fs.realpath(normalized).catch(() => normalized)
+                .then(value => process.platform === 'win32' ? value.toLowerCase() : value);
+            canonicalPaths.set(normalized, result);
+        }
+        return result;
+    };
+    const currentRoots = new Set(await Promise.all(roots.map(root => canonical(root.directory))));
+    const currentFolder = currentHistoryFolder ? await canonical(currentHistoryFolder) : undefined;
     const candidates: HistoryEntry[] = [];
     for (const folder of new Set(folders)) {
         let entries: import('node:fs').Dirent[];
         try { entries = await fs.readdir(folder, { withFileTypes: true }); } catch { continue; }
+        const association = await workspaceAssociation(folder);
+        const directories = await Promise.all(association.directories.map(directory => canonical(directory)));
+        const isCurrent = currentFolder !== undefined && await canonical(folder) === currentFolder;
+        const repositoryMatch = isCurrent || directories.some(directory => currentRoots.has(directory));
+        const workspace = isCurrent && association.label === 'Unknown workspace' ? 'Current workspace' : association.label;
         for (const entry of entries) {
             if (!entry.isFile() || !sessionFile.test(entry.name)) { continue; }
             const file = path.join(folder, entry.name);
             const stat = await fs.stat(file).catch(() => undefined);
             if (!stat || stat.size > MAX_HISTORY_BYTES) { continue; }
-            candidates.push({ file, label: `Chat ${entry.name.slice(0, 8)}`, updatedAt: stat.mtime.toISOString(), workspace: path.basename(path.dirname(folder)) });
+            candidates.push({ file, label: `Chat ${entry.name.slice(0, 8)}`, updatedAt: stat.mtime.toISOString(), workspace, repositoryMatch });
         }
     }
-    const recent = candidates.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 100);
+    const grouped = groupHistory(candidates);
+    const recent = [...grouped.repository, ...grouped.other];
     for (const entry of recent) {
         const handle = await fs.open(entry.file, 'r').catch(() => undefined);
         if (!handle) { continue; }
