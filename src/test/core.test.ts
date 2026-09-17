@@ -126,6 +126,41 @@ test('repository and wiki reads distinguish requests, content evidence, ranges, 
     assert.equal(resourceLink('https://dev.azure.com.evil.example/org/_git/repo', 'repository'), undefined);
 });
 
+test('saved MCP text-resource attachments decode without fetching their URI or fabricating source ranges', () => {
+    const body = Array.from({ length: 31 }, (_, index) => `sample line ${index + 1}`).join('\n');
+    const block = { type: 'embed', isText: false, asResource: true, mimeType: 'text/plain',
+        uri: { scheme: 'mcp-resource', authority: 'untrusted.example', path: '/not-a-local-file' }, value: Buffer.from(body).toString('base64') };
+    const call = { kind: 'toolInvocationSerialized', toolId: 'mcp_azuredevops_3_repo_file', toolCallId: 'attachment-read',
+        source: { type: 'mcp' }, isConfirmed: { type: 1 }, isComplete: true,
+        toolSpecificData: { rawInput: { action: 'get_content', path: '/README.md', repositoryId: 'example-repo', project: 'Example' } } };
+    const extract = (output: unknown) => extractResourceActivity({ requests: [{ response: [call, { ...call, resultDetails: { output: [output], isError: false } }] }] })[0]!;
+    const activity = extract(block);
+    assert.equal(activity.outcome, 'returned');
+    assert.equal(activity.evidence, 'text-response');
+    assert.equal(activity.preview, body);
+    assert.equal(activity.responseLines, 31);
+    assert.equal(activity.range, undefined);
+    assert.equal(activity.returnedRevision, undefined);
+    assert.equal(activity.returnedPath, undefined);
+    assert.equal(activity.url, undefined, 'Attachment URIs are never offered as resource links');
+    assert.equal(repositoryReadLines(activity).mapped, false);
+    assert.equal(repositoryReadLines(activity).lines.length, 31);
+    for (const change of [{ mimeType: 'image/png' }, { asResource: false }, { value: '%%% invalid base64' },
+        { value: Buffer.from([0xff, 0xfe]).toString('base64') }, { value: 'a'.repeat(2 * 1024 * 1024 + 1) }]) {
+        const rejected = extract({ ...block, ...change });
+        assert.equal(rejected.outcome, 'unavailable');
+        assert.equal(rejected.preview, undefined);
+    }
+    const nul = extract({ ...block, value: Buffer.from('binary\0text').toString('base64') });
+    assert.equal(nul.preview, undefined);
+    assert.match(nul.previewUnavailable ?? '', /Binary/);
+    const structured = extract({ ...block, mimeType: 'application/json; charset=utf-8', value: Buffer.from(JSON.stringify({
+        path: '/README.md', content: 'first\nsecond', startLine: 7, endLine: 8
+    })).toString('base64') });
+    assert.equal(structured.evidence, 'content');
+    assert.deepEqual(structured.range, { startLine: 7, endLine: 8 });
+});
+
 test('repository read-line view uses explicit matching ranges, escapes source, and labels unknown mapping', () => {
     const activity = extractResourceActivity({ requests: [{ response: [{ kind: 'toolInvocationSerialized', toolId: 'mcp_azuredevops_m_repo_file',
         toolCallId: 'read-lines', source: { type: 'mcp' }, isComplete: true, isConfirmed: { type: 1 },

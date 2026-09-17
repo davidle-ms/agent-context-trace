@@ -1,4 +1,5 @@
 import { excluded } from './core';
+import { isUtf8 } from 'node:buffer';
 import { marked, type Tokens } from 'marked';
 import type { WorkItemActivity } from './work-items';
 
@@ -48,6 +49,16 @@ function rangeOf(value: JsonObject): ResourceActivity['range'] {
     const endLine = value.endLine;
     return typeof startLine === 'number' && typeof endLine === 'number' && Number.isSafeInteger(startLine)
         && Number.isSafeInteger(endLine) && startLine > 0 && endLine >= startLine ? { startLine, endLine } : undefined;
+}
+
+function savedResponseText(block: unknown): string | undefined {
+    if (!object(block) || typeof block.value !== 'string' || block.value.length > 2 * 1024 * 1024) { return; }
+    if (block.isText === true) { return block.value; }
+    if (block.type !== 'embed' || block.isText !== false || block.asResource !== true || typeof block.mimeType !== 'string'
+        || !['text/plain', 'text/markdown', 'application/json'].includes(block.mimeType.split(';')[0]!.trim().toLowerCase())) { return; }
+    const bytes = Buffer.from(block.value, 'base64');
+    if (bytes.toString('base64') !== block.value || !isUtf8(bytes)) { return; }
+    return bytes.toString('utf8');
 }
 
 export function resourceLink(value: unknown, kind: ResourceActivity['kind']): string | undefined {
@@ -102,8 +113,9 @@ export function extractResourceActivity(snapshot: JsonObject): ResourceActivity[
         let content: string | undefined;
         if (entry.outcome === 'unavailable' && Array.isArray(details.output)) {
             for (const block of details.output.slice(0, 20)) {
-                if (!object(block) || block.isText !== true || typeof block.value !== 'string' || block.value.length > 2 * 1024 * 1024) { continue; }
-                const result = parse(block.value);
+                const savedText = savedResponseText(block);
+                if (savedText === undefined) { continue; }
+                const result = parse(savedText);
                 if (object(result)) {
                     if (result.isError === true || result.error || result.isFolder === true
                         || typeof result.path === 'string' && typeof input.path === 'string' && result.path !== input.path) { continue; }
@@ -122,10 +134,10 @@ export function extractResourceActivity(snapshot: JsonObject): ResourceActivity[
                     }
                     content = typeof result.content === 'string' ? result.content : undefined;
                     entry.evidence = content === undefined ? 'metadata' : 'content';
-                } else if (Array.isArray(result) || /^[\s]*[\[{]/.test(block.value) && result === undefined) {
+                } else if (Array.isArray(result) || /^[\s]*[\[{]/.test(savedText) && result === undefined) {
                     continue;
                 } else {
-                    content = typeof result === 'string' ? result : block.value;
+                    content = typeof result === 'string' ? result : savedText;
                     entry.evidence = 'text-response';
                 }
                 entry.outcome = 'returned';

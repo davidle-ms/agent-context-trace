@@ -337,13 +337,23 @@ export async function run(): Promise<void> {
         assert.ok(Math.abs(readLineColor[3]! - 24 / 255) < 0.01, 'Returned lines use the existing amber highlight opacity');
         assert.match(await readPanel.locator('#evidence').textContent() ?? '', /not the current repository file/);
         assert.equal(document.getText(), sourceBeforeReadView, 'Opening repository read lines does not alter the local file');
-        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'repository-read-lines-window.png') });
-        const unknownRangeSession = structuredClone(resourceSession);
-        unknownRangeSession.resources![0]!.range = undefined;
+        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'repository-read-lines-attachment-check.png') });
+        const attachmentText = Array.from({ length: 31 }, (_, index) => `Sample README line ${index + 1}`).join('\n');
+        const unknownRangeSession = extractHistory({ sessionId: 'ado-resources', customTitle: 'Synthetic saved text attachment', requests: [{ response: [{
+            kind: 'toolInvocationSerialized', toolId: 'mcp_azuredevops_3_repo_file', toolCallId: 'repo-content',
+            source: { type: 'mcp', serverLabel: 'AzureDevOps.Mcp' }, isComplete: true, isConfirmed: { type: 1 },
+            toolSpecificData: { rawInput: { action: 'get_content', repositoryId: 'Sample Repo', project: 'Sample Project', path: '/README.md' } },
+            resultDetails: { isError: false, output: [{ type: 'embed', isText: false, asResource: true, mimeType: 'text/plain',
+                uri: { scheme: 'mcp-resource', path: '/synthetic-output' }, value: Buffer.from(attachmentText).toString('base64') }] }
+        }] }] }, roots);
         runtime.view.showHistory(unknownRangeSession);
+        await repositoryEntry.locator('summary').filter({ hasText: '/README.md' }).waitFor();
+        assert.match(await repositoryEntry.locator('.work-outcome').textContent() ?? '', /Text response/);
+        assert.equal((await repositoryEntry.textContent())?.includes('Sample README line'), false, 'Saved attachment text remains hidden until requested');
         await repositoryEntry.getByRole('link', { name: 'View read lines', exact: true }).click();
         await readPanel.getByRole('heading', { name: 'Saved Response Lines' }).waitFor();
-        assert.deepEqual(await readPanel.locator('.line-number').allTextContents(), ['1', '2']);
+        assert.deepEqual(await readPanel.locator('.line-number').allTextContents(), Array.from({ length: 31 }, (_, index) => String(index + 1)));
+        assert.equal(await readPanel.locator('code').last().textContent(), 'Sample README line 31');
         assert.equal(await readPanel.locator('.read-line.recorded').count(), 0);
         assert.match(await readPanel.locator('#evidence').textContent() ?? '', /not source-file line numbers/);
         assert.equal(await page.locator('iframe.webview').count(), 2, 'Read-lines requests reuse one panel');
