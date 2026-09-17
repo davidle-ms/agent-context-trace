@@ -8,7 +8,24 @@ import { chromium } from 'playwright-core';
 import type { Runtime } from '../extension';
 import { TOOL_NAME } from '../core';
 import type { HistorySession } from '../history';
+import { extractHistory } from '../history';
 import { historyPickerItems } from '../views';
+
+function workItemCalls() {
+    const tool = { kind: 'toolInvocationSerialized', toolId: 'mcp_azuredevops_m_wit_work_item',
+        source: { type: 'mcp', serverLabel: 'Azure DevOps' }, isComplete: true, isConfirmed: { type: 1 } };
+    const get = { ...tool, toolCallId: 'ado-get', toolSpecificData: { rawInput: { action: 'get', project: 'Sample Project', id: 1042,
+        fields: ['System.Title', 'System.State', 'System.Description', 'System.AssignedTo'] } },
+        resultDetails: { output: [{ isText: true, type: 'embed', value: JSON.stringify({ id: 1042, rev: 7,
+            fields: { 'System.Title': 'Sample: improve session diagnostics', 'System.State': 'Active', 'System.Description': 'PRIVATE_BODY' },
+            url: 'https://dev.azure.com/example/Sample%20Project/_apis/wit/workitems/1042?token=PRIVATE_TOKEN' }) }] } };
+    const comments = { ...tool, toolCallId: 'ado-comments', toolSpecificData: { rawInput: { action: 'list_comments', project: 'Sample Project', workItemId: 1042 } },
+        resultDetails: { output: [{ isText: true, value: JSON.stringify({ totalCount: 9, comments: [
+            { id: 21, workItemId: 1042, text: 'PRIVATE_COMMENT' }, { id: 22, workItemId: 1042, text: 'PRIVATE_COMMENT' }] }) }] } };
+    const missing = { ...tool, toolCallId: 'ado-missing', toolSpecificData: { rawInput: { action: 'get', project: 'Sample Project', id: 1043 } } };
+    const failed = { ...missing, toolCallId: 'ado-failed', resultDetails: { isError: true } };
+    return [get, comments, missing, failed, get];
+}
 
 export async function run(): Promise<void> {
     const extension = vscode.extensions.getExtension<Runtime>('davidle-ms.agent-context-trace');
@@ -87,6 +104,20 @@ export async function run(): Promise<void> {
         await runtime.view.toggle();
         assert.equal(runtime.view.provideFileDecoration(neutralUri)?.badge, 'R');
         assert.equal(await fs.readFile(file, 'utf8'), initial + firstAppend + append, 'Extension never edits Copilot chat history');
+        const workItemUpdate = new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => { listener.dispose(); reject(new Error('MCP history watcher did not refresh')); }, 10000);
+            const listener = runtime.view.onDidChange(() => {
+                const selected = runtime.view.selected();
+                if (selected?.coverage === 'copilot-history-read-metadata' && selected.workItems?.length === 4) {
+                    clearTimeout(timeout); listener.dispose(); resolve();
+                }
+            });
+        });
+        const mcpAppend = JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: workItemCalls() }) + '\n';
+        await fs.appendFile(file, mcpAppend);
+        await workItemUpdate;
+        assert.equal(runtime.view.selected()?.events.length, 2, 'MCP history never creates file coverage');
+        assert.equal(await fs.readFile(file, 'utf8'), initial + firstAppend + append + mcpAppend, 'MCP extraction leaves source history unchanged');
         assert.equal(runtime.store.list().length, 0);
         console.log('PASS: existing Copilot chat selection, no tracker session, file-only history colors, selected history watcher, toggle, read-only source');
     } finally { await fs.rm(historyFolder, { recursive: true, force: true }); }
@@ -202,6 +233,67 @@ export async function run(): Promise<void> {
         await page.mouse.up();
         const expandedMap = await canvas.boundingBox();
         assert.ok(expandedMap && expandedMap.height > 150, 'Native divider gives the heatmap useful vertical space');
+        await heatmap.getByRole('tab', { name: 'Work Items', exact: true }).click();
+        await heatmap.locator('#work-empty').filter({ hasText: 'available for saved Copilot chats' }).waitFor();
+        const workSession = extractHistory({ sessionId: 'ado-preview', customTitle: 'Synthetic Azure DevOps preview',
+            requests: [{ timestamp: '2026-09-17T01:00:00Z', response: workItemCalls() }] }, roots);
+        runtime.view.showHistory(workSession);
+        await heatmap.locator('#work-summary').filter({ hasText: '4 recorded calls | 2 returned item responses' }).waitFor();
+        assert.equal(await heatmap.locator('.work-entry').count(), 4, 'Calls are deduplicated by ID');
+        const workRead = heatmap.locator('.work-entry').filter({ hasText: 'Sample: improve session diagnostics' });
+        await workRead.locator('summary').click();
+        await workRead.getByText('Returned fields', { exact: true }).waitFor();
+        const returnedFields = await workRead.locator('dt').filter({ hasText: /^Returned fields$/ }).locator('+ dd').textContent();
+        assert.match(returnedFields ?? '', /System.Description/);
+        assert.equal(returnedFields?.includes('System.AssignedTo'), false, 'Requested-only fields are not presented as returned');
+        assert.equal(await workRead.locator('a').getAttribute('href'), 'https://dev.azure.com/example/Sample%20Project/_workitems/edit/1042');
+        const commentRead = heatmap.locator('.work-entry').filter({ hasText: 'list_comments |' });
+        await commentRead.locator('summary').click();
+        assert.equal(await commentRead.locator('dt').filter({ hasText: 'Returned comments (this response)' }).locator('+ dd').textContent(), '2');
+        assert.equal(await commentRead.locator('dt').filter({ hasText: 'Comment IDs' }).locator('+ dd').textContent(), '21, 22');
+        assert.equal((await heatmap.locator('#work-items').textContent())?.includes('PRIVATE_'), false, 'Response bodies and query secrets never enter the UI');
+        assert.equal(await heatmap.locator('.work-outcome').filter({ hasText: 'Response metadata unavailable' }).count(), 1);
+        assert.equal(await heatmap.locator('.work-outcome').filter({ hasText: 'Failed call' }).count(), 1);
+        await commentRead.locator('summary').click();
+        await workRead.locator('summary').click();
+        await heatmap.locator('#work-items').evaluate(element => { element.scrollTop = 0; });
+        assert.equal(await heatmap.locator('#work-items').evaluate(element => element.scrollWidth <= element.clientWidth), true, 'Work-item metadata fits a narrow sidebar');
+        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'azure-devops-work-items.png') });
+        await section.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'azure-devops-work-items-panel.png') });
+        await workRead.locator('summary').click();
+        await heatmap.locator('#work-items').evaluate(element => { element.scrollTop = 0; });
+        await section.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'azure-devops-work-item-details.png') });
+        await heatmap.locator('#work-filter').fill('1043');
+        assert.equal(await heatmap.locator('.work-entry').count(), 2);
+        await heatmap.locator('#work-filter').fill('not found');
+        await heatmap.locator('#work-empty').filter({ hasText: 'No matching work items' }).waitFor();
+        await heatmap.locator('#work-filter').fill('');
+        const unsafeTitle = structuredClone(workSession);
+        unsafeTitle.workItems![0]!.title = '<img src=x onerror=alert(1)>';
+        runtime.view.showHistory(unsafeTitle);
+        await heatmap.locator('summary').filter({ hasText: '<img src=x onerror=alert(1)>' }).waitFor();
+        assert.equal(await heatmap.locator('#work-list img').count(), 0, 'Titles are text, never HTML');
+        runtime.view.showHistory(workSession);
+        const manyItems = { ...workSession, id: 'copilot:many-workitems', workItems: Array.from({ length: 51 }, (_, index) => ({
+            ...workSession.workItems![0]!, callId: `many-${index}`, itemId: 2000 + index
+        })) };
+        runtime.view.showHistory(manyItems);
+        await heatmap.locator('#work-summary').filter({ hasText: '51 recorded calls' }).waitFor();
+        assert.equal(await heatmap.locator('.work-entry').count(), 50);
+        await heatmap.locator('#work-more').click();
+        assert.equal(await heatmap.locator('.work-entry').count(), 51, 'Additional calls are paged into the view');
+        runtime.view.showHistory(workSession);
+        await heatmap.locator('#work-summary').filter({ hasText: '4 recorded calls' }).waitFor();
+        await runtime.view.toggle();
+        assert.equal(await heatmap.locator('.work-entry').count(), 4, 'Eye toggle does not hide work-item evidence');
+        await runtime.view.toggle();
+        runtime.view.showHistory({ ...workSession, id: 'copilot:empty-workitems', workItems: [] });
+        await heatmap.locator('#work-empty').filter({ hasText: 'No supported Azure DevOps' }).waitFor();
+        assert.equal(await heatmap.locator('.work-entry').count(), 0, 'Session switching clears external metadata');
+        await runtime.view.selectSession(sessionId);
+        await heatmap.getByRole('tab', { name: 'File Heatmap', exact: true }).click();
+        await canvas.waitFor({ state: 'visible' });
+        console.log('PASS: Azure DevOps work-item tab, returned fields and comment page metadata, filtering, safe text, sanitized links, deduplication, and session isolation');
         await page.waitForFunction(() => {
             const pane = Array.from(globalThis.document.querySelectorAll('.pane')).find(element => element.textContent?.includes('Agent Read Coverage'));
             return pane && pane.querySelectorAll('.monaco-list-row').length === 0;

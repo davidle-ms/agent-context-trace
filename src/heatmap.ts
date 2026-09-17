@@ -90,6 +90,23 @@ body {
 }
 * { box-sizing: border-box; }
 #content { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+#content[hidden], #work-items[hidden], #position[hidden] { display: none; }
+#tabs { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--cp-border); gap: 12px; }
+#tabs button { border: 0; border-bottom: 2px solid var(--cp-bg); padding: 5px 0; background: var(--cp-bg); color: var(--cp-text-muted); cursor: pointer; font: inherit; }
+#tabs button[aria-selected="true"] { border-bottom-color: var(--cp-single-edge); color: var(--cp-text); }
+button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visible { outline: 1px solid var(--cp-border-strong); outline-offset: 2px; }
+#work-items { flex: 1; min-height: 0; overflow: auto; }
+#work-heading { font-size: 12px; margin: 6px 0; }
+#work-summary, #work-empty { color: var(--cp-text-muted); font-size: 11px; margin: 8px 0; overflow-wrap: anywhere; }
+#work-filter { width: 100%; padding: 5px 6px; margin: 8px 0; border: 1px solid var(--cp-border); background: var(--cp-surface); color: var(--cp-text); font: inherit; border-radius: 2px; }
+.work-entry { padding: 10px 0; border-top: 1px solid var(--cp-border); overflow-wrap: anywhere; }
+.work-entry summary { cursor: pointer; font-size: 12px; }
+.work-outcome { display: block; color: var(--cp-text-muted); font-size: 11px; margin: 4px 0; }
+.work-entry dl { font-size: 11px; margin: 8px 0; }
+.work-entry dt { color: var(--cp-text-muted); margin-top: 8px; }
+.work-entry dd { margin: 2px 0; white-space: pre-wrap; }
+.work-entry a { color: var(--cp-single-edge); font-size: 11px; }
+#work-more { margin: 8px 0; border: 1px solid var(--cp-border); border-radius: 2px; padding: 4px 8px; color: var(--cp-text); background: var(--cp-surface); cursor: pointer; }
 #status, #empty { color: var(--cp-text-muted); overflow-wrap: anywhere; flex-shrink: 0; }
 #status { font-size: 11px; max-height: 3.6em; overflow: auto; }
 #filename { margin: 0; font-size: 12px; line-height: 16px; overflow-wrap: anywhere; flex-shrink: 0; }
@@ -118,7 +135,8 @@ body {
   #position { height: 32px; }
 }
 </style></head><body>
-<div id="content">
+<div id="tabs" role="tablist" aria-label="Recorded context"><button id="file-tab" role="tab" aria-selected="true" aria-controls="content">File Heatmap</button><button id="work-tab" role="tab" aria-selected="false" aria-controls="work-items" tabindex="-1">Work Items</button></div>
+<div id="content" role="tabpanel" aria-labelledby="file-tab">
 <div id="status"></div><h2 id="filename">No file open</h2>
 <div id="scale" aria-label="Recorded reads"><span class="single"><i></i>1</span><span class="repeat"><i></i>2-3</span><span class="frequent"><i></i>4-7</span><span class="intense"><i></i>8+</span></div>
 <div id="empty">No file open</div>
@@ -128,11 +146,86 @@ body {
 <div id="viewport"></div><div id="pointer" hidden></div></div>
 </div>
 <div id="position" aria-live="polite"></div>
+<section id="work-items" role="tabpanel" aria-labelledby="work-tab" hidden>
+<h2 id="work-heading">Azure DevOps / Work Items</h2>
+<div id="work-summary"></div><input id="work-filter" type="search" aria-label="Filter work-item activity" placeholder="Filter ID, title, project or field">
+<div id="work-empty"></div><div id="work-list"></div><button id="work-more" hidden>Show more</button>
+</section>
 <script nonce="${nonce}">
 const api = acquireVsCodeApi();
 const byId = id => document.getElementById(id);
 const canvas = byId('heatmap');
 const context = canvas.getContext('2d');
+let workState = { entries: [], empty: 'No session selected' };
+let workLimit = 50;
+let workSignature = '';
+function chooseTab(work) {
+  byId('content').hidden = work;
+  byId('position').hidden = work;
+  byId('work-items').hidden = !work;
+  for (const [id, selected] of [['file-tab', !work], ['work-tab', work]]) {
+    byId(id).setAttribute('aria-selected', String(selected)); byId(id).tabIndex = selected ? 0 : -1;
+  }
+  if (!work) requestAnimationFrame(draw);
+}
+byId('file-tab').addEventListener('click', () => chooseTab(false));
+byId('work-tab').addEventListener('click', () => chooseTab(true));
+byId('tabs').addEventListener('keydown', event => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const work = event.key === 'End' || event.key !== 'Home' && byId('work-items').hidden;
+  chooseTab(work); byId(work ? 'work-tab' : 'file-tab').focus();
+});
+const outcomes = { returned: 'Response metadata returned', unavailable: 'Response metadata unavailable', failed: 'Failed call', cancelled: 'Cancelled or denied', pending: 'Incomplete or unconfirmed call' };
+function renderWorkItems() {
+  const entries = workState.entries;
+  const calls = new Set(entries.map(item => item.callId)).size;
+  byId('work-summary').textContent = calls + ' recorded call' + (calls === 1 ? '' : 's') + ' | ' + entries.filter(item => item.outcome === 'returned').length + ' returned item responses | saved history (best effort)';
+  byId('work-tab').textContent = 'Work Items' + (calls ? ' (' + calls + ')' : '');
+  const query = byId('work-filter').value.trim().toLowerCase();
+  const filtered = entries.filter(item => [item.itemId, item.title, item.project, item.operation, ...item.returnedFields].join(' ').toLowerCase().includes(query));
+  byId('work-empty').textContent = !entries.length ? workState.empty : !filtered.length ? 'No matching work items' : '';
+  const open = new Set([...byId('work-list').querySelectorAll('details[open]')].map(element => element.dataset.key));
+  const fragment = document.createDocumentFragment();
+  for (const item of filtered.slice(0, workLimit)) {
+    const entry = document.createElement('details'); entry.className = 'work-entry';
+    entry.dataset.key = item.callId + ':' + item.itemId;
+    entry.open = open.has(entry.dataset.key);
+    const heading = document.createElement('summary');
+    heading.textContent = (item.itemId ? '#' + item.itemId : 'Unknown item') + ' ' + (item.title || 'Title unavailable');
+    const status = document.createElement('span'); status.className = 'work-outcome';
+    status.textContent = item.operation + ' | ' + outcomes[item.outcome];
+    heading.append(status); entry.append(heading);
+    const metadata = document.createElement('dl');
+    const field = (name, value) => {
+      const term = document.createElement('dt'); term.textContent = name;
+      const detail = document.createElement('dd'); detail.textContent = value;
+      metadata.append(term, detail);
+    };
+    field('Project', item.project || 'Unavailable');
+    field('Server / tool', item.server + '\\n' + item.toolId);
+    field('Request time', item.at ? new Date(item.at).toLocaleString() : 'Unavailable');
+    if (item.operation === 'list_comments') {
+      field('Returned comments (this response)', item.returnedComments === undefined ? 'Unavailable' : String(item.returnedComments));
+      field('Comment IDs', item.commentIds?.length ? item.commentIds.join(', ') : item.returnedComments === 0 ? 'None returned' : 'Unavailable');
+    } else {
+      field('Requested fields', item.requestedFields.length ? item.requestedFields.join('\\n') : 'Not specified');
+      field('Returned fields', item.returnedFields.length ? item.returnedFields.join('\\n') : item.outcome === 'returned' ? 'None returned' : 'Unavailable');
+      field('Returned revision', item.revision === undefined ? 'Unavailable' : String(item.revision));
+    }
+    entry.append(metadata);
+    if (item.url) {
+      const link = document.createElement('a'); link.href = item.url; link.textContent = 'Open in Azure DevOps';
+      link.addEventListener('click', event => { event.preventDefault(); api.postMessage({ type: 'openWorkItem', sessionId: workState.sessionId, callId: item.callId, itemId: item.itemId }); });
+      entry.append(link);
+    }
+    fragment.append(entry);
+  }
+  byId('work-list').replaceChildren(fragment);
+  byId('work-more').hidden = filtered.length <= workLimit;
+}
+byId('work-filter').addEventListener('input', () => { workLimit = 50; renderWorkItems(); });
+byId('work-more').addEventListener('click', () => { workLimit += 50; renderWorkItems(); });
 let state;
 let currentLine = 1;
 let keyboardLine;
@@ -243,6 +336,12 @@ canvas.addEventListener('keydown', event => {
 });
 window.addEventListener('message', event => {
   const message = event.data;
+  if (message.type === 'workItems') {
+    const signature = JSON.stringify(message);
+    if (signature === workSignature) return;
+    if (message.sessionId !== workState.sessionId) { byId('work-filter').value = ''; byId('work-list').replaceChildren(); workLimit = 50; }
+    workState = message; workSignature = signature; renderWorkItems(); return;
+  }
   if (message.type === 'viewport' && state?.token === message.token) { state.visible = message.visible; drawViewport(); return; }
   if (message.type === 'hover' && state?.token === message.token) {
     if (showLine(message.line)) {

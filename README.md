@@ -4,7 +4,7 @@ A VS Code extension that shades filenames in the built-in **Explorer** and recor
 
 ## Preview Status
 
-The preview includes an existing Copilot chat picker, a read-only local-history adapter, built-in Explorer and editor-section decorations, a hover-to-navigate file heatmap, and a persistent color toggle. Explicit instrumented tracker sessions remain available as an optional fallback. This is not a complete observer of all Copilot activity.
+The preview includes an existing Copilot chat picker, a read-only local-history adapter, built-in Explorer and editor-section decorations, a hover-to-navigate file heatmap, an Azure DevOps **Work Items** activity tab, and a persistent color toggle. Explicit instrumented tracker sessions remain available as an optional fallback. This is not a complete observer of all Copilot activity.
 
 **Existing chat mode** recognizes supported completed/confirmed `copilot_readFile` entries in saved VS Code chat history. It does not require starting a tracker or using `#agentContextRead`. **Tracker mode** records only reads through that contributed tool. Neither mode infers reads from file visibility, search results, terminal commands, or prompt attachments. A colored file means recorded evidence exists at that path, not that the whole file or current revision was read or understood.
 
@@ -75,7 +75,23 @@ The heatmap is at least 320px tall, with 20px of breathing room above and below 
 
 The heatmap reuses the editor's displayed ranges, including revision checks, historical opt-out, dirty-buffer handling, and session isolation. Missing or stale ranges stay uncolored; they are not inferred as whole-file reads. Editing clears stale history colors in both places. The existing eye button also hides the heatmap. No-session, no-file, oversized-file, and unavailable-range states are explicit.
 
-The embedded view receives only relative filenames, line counts, displayed read ranges, and viewport metadata, never source text or chat content. Its nonce-restricted scripts and styles load no network resources, and navigation messages are checked against the current file/session view and line bounds. Switching files or sessions invalidates pending navigation messages.
+The heatmap receives only relative filenames, line counts, displayed read ranges, and viewport metadata. The Work Items tab receives the derived metadata described below. Neither receives source text, prompts, descriptions, or comment bodies. Nonce-restricted scripts and styles load no network resources, and navigation messages are checked against the current file/session view and line bounds. Switching files or sessions invalidates pending navigation messages.
+
+## Azure DevOps Work Items
+
+Choose an existing Copilot chat, then select **Work Items** inside Agent Read Coverage. It lists supported Azure DevOps MCP calls from that session, even when there are no local file reads or no editor is open. No Azure DevOps request is rerun, no server configuration changes are made, and original history files remain untouched. The existing history watcher refreshes this tab when the selected chat is saved.
+
+Each row represents a call/item pair. Expand it to see the item ID, returned title when available, project, server/tool, request timestamp, requested field names, returned field names, and returned revision. Comment-list calls show IDs and the number of comments returned in that response, not the server's total comment count. A missing title stays unavailable rather than being inferred from another call. Repeated calls remain separate; duplicate saved entries for the same tool-call ID are counted once. The tab badge counts distinct calls, including unsuccessful calls.
+
+Supported tool IDs are `mcp_azuredevops_*_wit_work_item` with `get`, `get_batch`, or `list_comments`, plus the `mcp_azuredevops_*_wit_get_work_item` form. The parser accepts the observed `toolInvocationSerialized` MCP record, inputs in `toolSpecificData.rawInput` or JSON `resultDetails.input`, and JSON text blocks in `resultDetails.output`. It recognizes direct work-item objects, batch arrays or `value` arrays, and comment arrays or `comments` arrays. Other tools and actions, including writes, searches, revisions, wiki pages, and pipeline logs, are outside this first slice.
+
+Only completed, confirmed, non-error calls with a recognized response shape are labelled **Response metadata returned**. Requested fields are never substituted for returned fields. Missing, truncated, oversized, unsupported, or mismatched results show **Response metadata unavailable**; failed, cancelled/denied, and incomplete/unconfirmed calls have separate outcomes. Returned evidence does not prove the model consumed or understood it and does not reveal the server's internal reads. Work items never produce local-file heatmap coverage.
+
+Filter by item ID, title, project, operation, or returned field name. Results render 50 rows at a time; **Show more** reveals the next 50. Switching sessions clears the filter and previous entries. The eye toggle controls file colours only, not work-item evidence. **Open in Azure DevOps** appears only when a returned URL identifies that item on an allowed HTTPS Azure DevOps host; credentials, query strings, and fragments are not retained. Links are revalidated against the selected session before opening.
+
+Privacy: titles, IDs, field names, projects, and links can be sensitive. Apart from the title and project, returned field values, descriptions, comment bodies, arbitrary inputs, and authentication data are not copied into derived metadata or the view. Metadata is held in memory, not persisted as a second chat archive. Unredacted JSON exports include it; choosing the redacted export option omits the entire work-item activity section. An empty or unknown response does not establish that nothing was read.
+
+Bounds: history remains limited to 32 MiB; work-item parsing allows up to 5,000 distinct calls and 10,000 call/item entries. It inspects at most 20 text output blocks per call, each up to 2 MiB of text, 200 batch IDs/items, 200 valid field names, and 1,000 comments per recognized response. Titles and project/server labels are capped at 240 characters. Unsupported or incomplete metadata may therefore remain unavailable. Single-item extraction was checked read-only against a real local saved call; batch/comment schemas and UI behavior use synthetic fixtures. Broad compatibility across MCP server versions is not claimed.
 
 ## Optional Instrumented Tracker
 
@@ -101,12 +117,12 @@ Browse and open files in the normal Explorer. Right-click a file there and choos
 
 ## Privacy and Limits
 
-- Existing-chat mode reads local files that can contain prompts and source code in memory, after opt-in. It retains only derived read metadata in memory and the consent/source-file selection in extension workspace state; it does not duplicate or modify the chat file. Explicit exports contain derived metadata only. Chat titles, paths, and timestamps remain sensitive.
+- Existing-chat mode reads local files that can contain prompts and source code in memory, after opt-in. It retains only derived file/work-item metadata in memory and the consent/source-file selection in extension workspace state; it does not duplicate or modify the chat file. Explicit exports contain derived metadata only. Chat titles, paths, work-item titles/IDs, and timestamps remain sensitive.
 - Historical coverage is best effort and version-dependent. Completed/confirmed tool entries are evidence of recorded activity, not proof of successful model consumption. Copilot's original save/retention behavior determines which entries remain available.
 - Source is returned to Copilot when the read tool is invoked. The extension itself sends no trace telemetry to a separate service.
 - Persisted metadata includes relative paths, tracker labels, timestamps, ranges, document fingerprints, and whether a buffer was unsaved. No source text, prompts, auth tokens, or tool response bodies are saved in the trace.
 - Metadata is stored as JSON under the extension's workspace storage, outside the repository. It is not encrypted and can reveal project structure. Disk sync and backup policies still apply.
-- Explicit export offers path/label redaction. Fingerprints, timestamps, and opaque root IDs remain metadata; redaction is not a guarantee of anonymity.
+- Explicit export offers path/label redaction and omits work-item metadata in redacted mode. Fingerprints, timestamps, and opaque root IDs remain metadata; redaction is not a guarantee of anonymity.
 - Reads are limited to local workspace text files of at most 1 MiB, up to 500 lines per request, and bounded response size/token budget. Traversal and symlink/junction escapes are rejected. File browsing and display exclusions are handled by VS Code's built-in Explorer; the extension no longer enumerates directories or starts directory-listing watchers.
 - Default read exclusions cover `.git`, dependencies, environment files, common credential locations, and private-key formats. Additional user-defined restrictions use `agentContextTrace.excludeGlobs` (workspace-relative glob patterns).
 - **Copilot content exclusions and organization policies are not inherited by this custom tool.** Review policy compatibility before enabling it on organizational code. These checks are not a security sandbox against a hostile filesystem.
@@ -119,8 +135,8 @@ Browse and open files in the normal Explorer. Right-click a file there and choos
 |---------|---------|
 | `npm run check-types` | Strict TypeScript validation. |
 | `npm run compile` | Compile tests and bundle the extension. |
-| `npm run test:unit` | Sixteen tests covering per-line frequency, inclusive overlaps, tier boundaries, deduplication, large intervals, revision checks, historical line-range formats, workspace association, chat replay/extraction, read-only handling, path scope, persistence, and attribution. |
-| `npm run test:extension` | Native heatmap pixels, compact/expanded layouts, long-file hover alignment, keyboard navigation, cursor/source preservation, file switching, edit invalidation, four amber tiers, exact-count tooltips, split editors, shared toggle, grouped picker, and restart persistence. |
+| `npm run test:unit` | Eighteen tests covering work-item reads/batches/comments, safe links and redaction, plus per-line frequency, overlaps, revision checks, workspace association, history replay, path scope, persistence, and attribution. |
+| `npm run test:extension` | Native work-item tab, filtering/pagination, returned-versus-requested fields, comment page metadata, safe text, session isolation and live history updates; existing heatmap, grouped picker, and restart persistence checks. |
 | `npm run package` | Produce a self-contained VSIX without runtime npm installation. |
 
 The host test runner downloads VS Code 1.100.0 by default. To use an installed executable in PowerShell, set `$env:VSCODE_EXECUTABLE_PATH` to the full path of its executable before running the test command. Tests use temporary workspaces/profiles, and screenshots are written to the ignored `.vscode-test/screenshots` directory. TypeScript validation is temporarily disabled in the test profile so placeholder-code diagnostics do not override filename palette checks; normal user settings are untouched. Only the test windows expose local debugging endpoints; the extension does not start a server.

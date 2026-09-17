@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { Root, ReadEvent, Session, summary, TraceStore, resolveFile, hash, MAX_FILE_BYTES, readHighlightRanges, ReadRange, readFrequency, ReadFrequency, isWithin } from './core';
 import { HistoryRead, HistorySession, historyStatus, HistoryEntry, groupHistory } from './history';
 import { heatmapHtml } from './heatmap';
+import { workItemLink } from './work-items';
 
 const frequencyColors = {
     single: { background: 'readSectionBackground', border: 'readSectionBorder', filename: 'readFileForeground' },
@@ -164,6 +165,7 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
         void vscode.commands.executeCommand('setContext', 'agentContextTrace.fileColorsEnabled', this.enabled);
         this.decorated.fire([...affectedFiles.values()]);
         this.refreshEditorHighlights();
+        this.refreshWorkItems();
         this.changed.fire();
     }
 
@@ -212,8 +214,14 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
             const value = message as Record<string, unknown>;
             if (value.type === 'ready') { this.refreshHeatmap(); }
             else if (value.type === 'navigate') { this.navigateHeatmap(value); }
+            else if (value.type === 'openWorkItem' && value.sessionId === this.history?.id) {
+                const activity = this.history?.workItems?.find(item => item.callId === value.callId && item.itemId === value.itemId);
+                const link = activity?.itemId ? workItemLink(activity.url, activity.itemId) : undefined;
+                if (link) { void vscode.env.openExternal(vscode.Uri.parse(link)); }
+            }
+            if (value.type === 'ready') { this.refreshWorkItems(); }
         });
-        const visibility = view.onDidChangeVisibility(() => { if (view.visible) { this.refreshHeatmap(); } });
+        const visibility = view.onDidChangeVisibility(() => { if (view.visible) { this.refreshHeatmap(); this.refreshWorkItems(); } });
         view.onDidDispose(() => {
             messages.dispose(); visibility.dispose();
             if (this.webview === view) { this.webview = undefined; }
@@ -224,6 +232,14 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
     setStatus(message: string): void {
         this.statusMessage = message;
         this.refreshHeatmap();
+    }
+
+    private refreshWorkItems(): void {
+        const session = this.selected();
+        void this.webview?.webview.postMessage({ type: 'workItems', sessionId: session?.id,
+            entries: session?.coverage === 'copilot-history-read-metadata' ? session.workItems ?? [] : [],
+            empty: !session ? 'No session selected' : session.coverage !== 'copilot-history-read-metadata'
+                ? 'Work-item activity is available for saved Copilot chats.' : 'No supported Azure DevOps work-item calls saved in this session.' });
     }
 
     private heatmapTarget(): vscode.TextEditor | undefined {

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, ParseError } from 'jsonc-parser';
 import { excluded, isWithin, Root } from './core';
+import { extractWorkItemActivity, WorkItemActivity } from './work-items';
 
 export const MAX_HISTORY_BYTES = 32 * 1024 * 1024;
 const MAX_HEADER_BYTES = 256 * 1024;
@@ -27,6 +28,7 @@ export interface HistorySession {
     events: HistoryRead[];
     recognizedCalls: number;
     unmappedCalls: number;
+    workItems?: WorkItemActivity[];
 }
 export interface HistoryEntry { file: string; label: string; updatedAt: string; workspace: string; repositoryMatch: boolean }
 
@@ -96,6 +98,9 @@ export function historyStatus(session: HistorySession): string {
     if (session.recognizedCalls) {
         return `Local Copilot history: ${session.recognizedCalls} read entries found, but none map to included files in this repository. Check the open folder, read metadata, and exclusions.`;
     }
+    if (session.workItems?.length) {
+        return 'No supported local file reads saved. Azure DevOps activity is available in Work Items.';
+    }
     return 'Local Copilot history: no completed supported file reads saved yet. Continue the chat or select another session; colors update when history is saved.';
 }
 
@@ -158,7 +163,8 @@ export function extractHistory(snapshot: JsonObject, roots: readonly Root[]): Hi
         throw new Error('Unsupported Copilot chat session.');
     }
     const session: HistorySession = { id: `copilot:${snapshot.sessionId}`, label: title(snapshot.customTitle, `Chat ${snapshot.sessionId.slice(0, 8)}`),
-        createdAt: date(snapshot.creationDate) ?? '', coverage: 'copilot-history-read-metadata', events: [], recognizedCalls: 0, unmappedCalls: 0 };
+        createdAt: date(snapshot.creationDate) ?? '', coverage: 'copilot-history-read-metadata', events: [], recognizedCalls: 0, unmappedCalls: 0,
+        workItems: extractWorkItemActivity(snapshot) };
     const calls = new Map<string, { tool: JsonObject; at?: string }>();
     for (const request of snapshot.requests) {
         if (!object(request) || !Array.isArray(request.response)) { continue; }

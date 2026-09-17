@@ -7,10 +7,60 @@ import { test } from 'node:test';
 import { excluded, hash, isWithin, parseSession, ReadEvent, resolveFile, sliceRead, summary, TraceStore, validateInput, readHighlightRanges, readFrequency } from '../core';
 import { pathToFileURL } from 'node:url';
 import { extractHistory, replayHistory, readHistory, listHistory, historyStatus, groupHistory, HistoryEntry } from '../history';
+import { extractWorkItemActivity, workItemLink, redactWorkItemActivity } from '../work-items';
 
 const input = { sessionId: randomUUID(), filePath: '/workspace/source.ts', startLine: 1, endLine: 3 };
 const event = (startLine = 1, endLine = 10): ReadEvent => ({ id: randomUUID(), rootId: hash('root'), relativePath: 'source.ts',
     startLine, endLine, requestedEndLine: endLine, snapshotHash: hash('snapshot'), isDirty: false, at: new Date().toISOString() });
+
+test('work-item reads preserve returned metadata, not requested-field assumptions or response bodies', () => {
+    const tool = { kind: 'toolInvocationSerialized', toolId: 'mcp_azuredevops_m_wit_work_item', toolCallId: 'ado-read',
+        source: { type: 'mcp', serverLabel: 'Azure DevOps' }, isComplete: true, isConfirmed: { type: 1 },
+        toolSpecificData: { rawInput: { action: 'get', project: 'Demo', id: 123, fields: ['System.Title', 'System.Description', 'System.State'] } },
+        resultDetails: { output: [{ type: 'embed', isText: true, value: JSON.stringify({ id: 123, rev: 2,
+            fields: { 'System.Title': 'Example item', 'System.Description': 'PRIVATE_BODY' },
+            url: 'https://dev.azure.com/example/Demo/_apis/wit/workitems/123?secret=PRIVATE_QUERY' }) }] } };
+    const snapshot = { sessionId: 'mcp-chat', requests: [{ timestamp: 1000, response: [tool, tool] }] };
+    const activity = extractWorkItemActivity(snapshot);
+    assert.equal(activity.length, 1);
+    assert.equal(activity[0]?.title, 'Example item');
+    assert.deepEqual(activity[0]?.returnedFields, ['System.Title', 'System.Description']);
+    assert.equal(activity[0]?.url, 'https://dev.azure.com/example/Demo/_workitems/edit/123');
+    assert.equal(activity[0]?.revision, 2);
+    assert.equal(activity[0]?.outcome, 'returned');
+    assert.equal(JSON.stringify(activity).includes('PRIVATE_'), false);
+    assert.deepEqual(extractHistory(snapshot, []).events, [], 'Remote items never become local file coverage');
+    for (const [extra, expected] of [[{ resultDetails: {} }, 'unavailable'], [{ isError: true }, 'failed'],
+        [{ isCancelled: true }, 'cancelled'], [{ isComplete: false }, 'pending']] as const) {
+        const entry = extractWorkItemActivity({ requests: [{ response: [{ ...tool, ...extra }] }] })[0]!;
+        assert.equal(entry.outcome, expected);
+        assert.deepEqual(entry.returnedFields, []);
+    }
+    assert.deepEqual(extractWorkItemActivity({ requests: [{ response: [{ ...tool, toolId: 'mcp_azuredevops_m_wit_work_item_write' }] }] }), []);
+    assert.deepEqual(extractWorkItemActivity({ requests: [{ response: [{ ...tool, source: { type: 'extension' } }] }] }), []);
+    assert.equal(workItemLink('https://evil.example/_workitems/edit/123', 123), undefined);
+    assert.equal(workItemLink('https://dev.azure.com/example/_workitems/edit/124', 123), undefined);
+    assert.equal(workItemLink('javascript:alert(1)', 123), undefined);
+});
+
+test('work-item batches and comments retain only evidence for each requested item and exports redact metadata', () => {
+    const call = (action: string, args: object, result: unknown) => ({ kind: 'toolInvocationSerialized', toolId: 'mcp_azuredevops_2_wit_work_item',
+        toolCallId: action, source: { type: 'mcp' }, isComplete: true, isConfirmed: { type: 1 },
+        resultDetails: { input: JSON.stringify({ action, project: 'Demo', ...args }),
+            output: [{ isText: true, value: JSON.stringify(result) }] } });
+    const snapshot = { requests: [{ response: [call('get_batch', { ids: [12, 13, 12] }, [{ id: 12, fields: { 'System.Title': 'Batch item' } }]),
+        call('list_comments', { workItemId: 12 }, { totalCount: 100, comments: [{ id: 4, workItemId: 12, text: 'PRIVATE_COMMENT' }] })] }] };
+    const entries = extractWorkItemActivity(snapshot);
+    assert.deepEqual(entries.map(entry => entry.outcome), ['returned', 'unavailable', 'returned']);
+    assert.deepEqual(entries[2]?.commentIds, [4]);
+    assert.equal(entries[2]?.returnedComments, 1, 'Only the returned comment page is counted');
+    assert.equal(JSON.stringify(entries).includes('PRIVATE_COMMENT'), false);
+    const exported = { label: 'Redacted', workItems: entries };
+    redactWorkItemActivity(exported);
+    assert.deepEqual(exported, { label: 'Redacted' });
+    const mismatch = call('list_comments', { workItemId: 12 }, { comments: [{ id: 3, workItemId: 99, text: 'wrong' }] });
+    assert.equal(extractWorkItemActivity({ requests: [{ response: [mismatch] }] })[0]?.outcome, 'unavailable');
+});
 
 test('chat JSONL reconstructs snapshots, replacements, appends, and partial final writes', () => {
     const lines = [
