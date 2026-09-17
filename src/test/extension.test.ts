@@ -321,6 +321,36 @@ export async function run(): Promise<void> {
         });
         assert.deepEqual(heatPixels.map(pixel => pixel.slice(0, 3)), [[232, 179, 90], [218, 160, 68], [204, 144, 46], [191, 132, 28]],
             'Rendered heatmap pixels match the four editor amber tiers');
+        const verifyHoverMarker = async (fraction: number) => {
+            const marker = await heatmap.locator('#pointer').evaluate(element => {
+                const bounds = element.getBoundingClientRect();
+                const map = globalThis.document.getElementById('heatmap')!.getBoundingClientRect();
+                const style = getComputedStyle(element);
+                return { hidden: (element as HTMLElement).hidden, width: bounds.width, mapWidth: map.width,
+                    center: bounds.top + bounds.height / 2 - map.top, mapHeight: map.height,
+                    height: parseFloat(style.height), outline: style.boxShadow, pointerEvents: style.pointerEvents };
+            });
+            assert.equal(marker.hidden, false, 'Hover marker is visible');
+            assert.ok(Math.abs(marker.width - marker.mapWidth) < 1, 'Hover line spans the heatmap width');
+            assert.ok(Math.abs(marker.center - fraction * marker.mapHeight) < 2, 'Hover line follows the actual pointer height, not a rounded source-line midpoint');
+            assert.ok(marker.height >= 1.5 && marker.outline !== 'none', 'Hover marker has a contrasting outlined stroke');
+            assert.equal(marker.pointerEvents, 'none', 'Marker cannot intercept mouse movement');
+        };
+        for (const fraction of [0.04, 0.16, 0.37, 0.78, 0.96]) {
+            const bounds = await canvas.boundingBox();
+            assert.ok(bounds);
+            await canvas.hover({ position: { x: bounds.width / 2, y: fraction * bounds.height } });
+            await verifyHoverMarker(fraction);
+            await heatmap.locator('#position').filter({ hasText: `Line ${Math.floor(fraction * document.lineCount) + 1} / ${document.lineCount}` }).waitFor();
+        }
+        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'file-heatmap-hover-marker.png') });
+        await canvas.evaluate(element => {
+            element.addEventListener('pointerleave', () => {
+                (element as HTMLElement).dataset.markerHiddenOnLeave = String(globalThis.document.getElementById('pointer')!.hidden);
+            }, { once: true });
+        });
+        await heatmap.locator('#position').hover();
+        await heatmap.locator('#heatmap[data-marker-hidden-on-leave="true"]').waitFor();
         const fourthLine = page.locator('.monaco-editor .view-lines .view-line').getByText('fourth', { exact: true }).first();
         await fourthLine.hover({ position: { x: 4, y: 6 } });
         await page.getByText(/Lines 4-4: 8 recorded reads in this session/).waitFor();
@@ -376,6 +406,7 @@ export async function run(): Promise<void> {
             await canvas.hover({ position: { x: bounds.width / 2, y: (line - 0.5) / 240 * bounds.height } });
             await heatmap.locator('#position').filter({ hasText: `Line ${line} / 240 | ${count} recorded reads` }).waitFor();
             await revealed;
+            await verifyHoverMarker((line - 0.5) / 240);
             assert.ok(longEditor.selection.isEqual(selectionBefore), 'Hover scrolls without moving the editor cursor');
         }
         assert.equal(longDocument.getText(), heatmapSource, 'Heatmap navigation does not edit source');

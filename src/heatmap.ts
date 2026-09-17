@@ -106,7 +106,7 @@ body {
 #heatmap:focus-visible { outline: 1px solid var(--cp-border-strong); outline-offset: 2px; }
 #viewport, #pointer { pointer-events: none; position: absolute; left: 0; right: 0; }
 #viewport { border: 1px solid var(--cp-text-muted); min-height: 2px; }
-#pointer { border-top: 1px solid var(--cp-text); }
+#pointer { height: 2px; background: var(--cp-text); box-shadow: 0 0 0 1px var(--cp-surface); transform: translateY(-50%); z-index: 2; }
 #guides { position: absolute; inset: 0; pointer-events: none; }
 .line-label { position: absolute; right: calc(100% + 6px); transform: translateY(-50%); color: var(--cp-text-muted); font: 10px/14px Consolas, monospace; white-space: nowrap; }
 #position { height: 48px; flex-shrink: 0; font-size: 11px; line-height: 16px; white-space: pre-line; overflow: auto; overflow-wrap: anywhere; color: var(--cp-text-muted); }
@@ -135,6 +135,7 @@ const canvas = byId('heatmap');
 const context = canvas.getContext('2d');
 let state;
 let currentLine = 1;
+let keyboardLine;
 let pending;
 let timer;
 const tier = count => count >= 8 ? 'intense' : count >= 4 ? 'frequent' : count >= 2 ? 'repeat' : 'single';
@@ -195,11 +196,11 @@ function drawViewport() {
     byId('viewport').style.height = ((visible.endLine - visible.startLine + 1) / state.lineCount * 100) + '%';
   }
 }
-function showLine(line) {
+function showLine(line, fraction) {
   if (!state?.navigable || !Number.isInteger(line)) return false;
   currentLine = Math.max(1, Math.min(state.lineCount, line));
   byId('pointer').hidden = false;
-  byId('pointer').style.top = ((currentLine - 0.5) / state.lineCount * 100) + '%';
+  byId('pointer').style.top = ((fraction ?? (currentLine - 0.5) / state.lineCount) * 100) + '%';
   const matches = state.ranges.filter(range => range.startLine <= currentLine && range.endLine >= currentLine);
   const count = matches.reduce((total, range) => total + range.readCount, 0);
   const provenance = matches.some(range => !range.verified) ? 'Historical range; file may have changed.' : matches.length ? 'Source revision matches.' : 'No displayed read range.';
@@ -209,26 +210,34 @@ function showLine(line) {
   canvas.setAttribute('aria-valuetext', label + '. ' + provenance);
   return true;
 }
-function point(line, focus = false) {
-  if (!showLine(line)) return;
+function point(line, focus = false, fraction) {
+  if (!showLine(line, fraction)) return;
   pending = { type: 'navigate', token: state.token, line: currentLine, focus };
   if (focus) { clearTimeout(timer); timer = undefined; }
   if (!timer) timer = setTimeout(() => { timer = undefined; if (pending) api.postMessage(pending); pending = undefined; }, focus ? 0 : 30);
 }
-function lineAt(event) {
+function pointAt(event, focus = false) {
+  if (!state?.navigable) return;
+  keyboardLine = undefined;
   const bounds = canvas.getBoundingClientRect();
-  return Math.floor((event.clientY - bounds.top) / bounds.height * state.lineCount) + 1;
+  if (!bounds.height) return;
+  const fraction = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
+  point(Math.floor(fraction * state.lineCount) + 1, focus, fraction);
 }
-canvas.addEventListener('pointermove', event => { if (state) point(lineAt(event)); });
-canvas.addEventListener('click', event => { if (state) point(lineAt(event), true); });
+canvas.addEventListener('pointerenter', event => pointAt(event));
+canvas.addEventListener('pointermove', event => pointAt(event));
+canvas.addEventListener('click', event => pointAt(event, true));
 canvas.addEventListener('pointerleave', () => { byId('pointer').hidden = true; clearTimeout(timer); timer = undefined; pending = undefined; });
+canvas.addEventListener('blur', () => { keyboardLine = undefined; });
 canvas.addEventListener('keydown', event => {
   if (!state) return;
-  const lines = { ArrowDown: currentLine + 1, ArrowUp: currentLine - 1, PageDown: currentLine + 20,
-    PageUp: currentLine - 20, Home: 1, End: state.lineCount, Enter: currentLine, ' ': currentLine };
+  const anchor = keyboardLine ?? currentLine;
+  const lines = { ArrowDown: anchor + 1, ArrowUp: anchor - 1, PageDown: anchor + 20,
+    PageUp: anchor - 20, Home: 1, End: state.lineCount, Enter: anchor, ' ': anchor };
   if (!(event.key in lines)) return;
   event.preventDefault();
-  point(lines[event.key], event.key === 'Enter' || event.key === ' ');
+  keyboardLine = Math.max(1, Math.min(state.lineCount, lines[event.key]));
+  point(keyboardLine, event.key === 'Enter' || event.key === ' ');
 });
 window.addEventListener('message', event => {
   const message = event.data;
@@ -236,6 +245,7 @@ window.addEventListener('message', event => {
   if (message.type === 'hover' && state?.token === message.token) { showLine(message.line); return; }
   if (message.type !== 'state') return;
   state = message;
+  keyboardLine = undefined;
   clearTimeout(timer); timer = undefined; pending = undefined;
   currentLine = Math.min(currentLine, state.lineCount || 1);
   byId('status').textContent = state.status;
