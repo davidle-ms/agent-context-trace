@@ -1,0 +1,17 @@
+{
+  "servers": {
+    "ado-remote-mcp": {
+      "type": "http",
+      "url": "https://mcp.dev.azure.com/"
+    },
+    "engineering.wiki": {
+      "type": "http",
+      "url": "https://mcp.dev.azure.com/ceapex",
+      "headers": {
+        "X-MCP-Toolsets": "wiki",
+        "X-MCP-Readonly": "true"
+      }
+    }
+  },
+  "inputs": []
+}

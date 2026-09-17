@@ -4,7 +4,7 @@ A VS Code extension that shades filenames in the built-in **Explorer** and recor
 
 ## Preview Status
 
-The preview includes an existing Copilot chat picker, a read-only local-history adapter, built-in Explorer and editor-section decorations, a hover-to-navigate file heatmap, Azure DevOps **Work Items**, **Repository Files**, **Wiki Pages**, **Code Searches**, and **Pipeline Logs** activity tabs, and a persistent color toggle. Explicit instrumented tracker sessions remain available as an optional fallback. This is not a complete observer of all Copilot activity.
+The preview includes an existing Copilot chat picker, a read-only local-history adapter, built-in Explorer and editor-section decorations, a hover-to-navigate file heatmap, a unified **Timeline**, Azure DevOps **Work Items**, **Repository Files**, **Wiki Pages**, **Code Searches**, and **Pipeline Logs** activity tabs, and a persistent color toggle. Explicit instrumented tracker sessions remain available as an optional fallback. This is not a complete observer of all Copilot activity.
 
 **Existing chat mode** recognizes supported completed/confirmed `copilot_readFile` entries in saved VS Code chat history. It does not require starting a tracker or using `#agentContextRead`. **Tracker mode** records only reads through that contributed tool. Neither mode infers reads from file visibility, search results, terminal commands, or prompt attachments. A colored file means recorded evidence exists at that path, not that the whole file or current revision was read or understood.
 
@@ -77,6 +77,18 @@ The heatmap reuses the editor's displayed ranges, including revision checks, his
 
 The heatmap receives only relative filenames, line counts, displayed read ranges, and viewport metadata. The Work Items tab receives the derived metadata described below. Repository Files and Wiki Pages can additionally show bounded saved response text on explicit request; it is never executed or rendered as HTML. Nonce-restricted scripts and styles load no network resources, and navigation messages are checked against the current file/session view and line bounds. Switching sessions clears external metadata and previews.
 
+## Agent Evidence Timeline
+
+Choose **Timeline** to see supported saved evidence in request-time order. It combines local file reads, work-item calls, repository-file responses, wiki pages, code searches, and pipeline-log responses without treating them as equivalent evidence. Each event shows its evidence type, saved timestamp, outcome, identity, and available range or response summary. Calls returning multiple local files or work items are grouped by tool-call ID; repeated serialized records do not inflate the event count.
+
+The timeline rail uses a labelled, type-specific marker and color for local files, work items, repository files, wiki pages, searches, and logs. Filled round markers indicate recorded/returned evidence, dashed hollow markers indicate unavailable or pending evidence, and angled square markers identify failed or cancelled evidence; the adjacent text always states the outcome without relying on color or shape alone. Consecutive events of the same type within the same displayed second collapse into an expandable group. This keeps bursts such as several local file reads compact while preserving every individual path, range, outcome, and action inside the group.
+
+Filter by evidence type or search path, query, ID, title, and outcome. Local-file actions open the recorded workspace path so the existing heatmap can display its ranges and revision caveats. Azure DevOps actions switch to the matching detail tab and expand the exact saved call. The timeline renders 50 events at a time, oldest to newest, and resets filters when the selected session changes.
+
+Timeline payloads are derived metadata only. Repository, wiki, snippet, and log response text remains withheld until explicitly requested in its detail tab. Labels are rendered as text, links and file targets are revalidated against the selected session, and no original tool call is rerun. A timeline event proves only that supported evidence was saved; it does not prove model consumption or understanding.
+
+Saved history does not currently expose a tested, reliable schema for edit or terminal-command provenance in this extension. The timeline says so explicitly and does not infer changes from file state, output text, or nearby reads. Instrumented tracker sessions remain outside the timeline because they do not represent a saved Copilot-chat chronology.
+
 ## Azure DevOps Work Items
 
 Choose an existing Copilot chat, then select **Work Items** inside Agent Read Coverage. It lists supported Azure DevOps MCP calls from that session, even when there are no local file reads or no editor is open. No Azure DevOps request is rerun, no server configuration changes are made, and original history files remain untouched. The existing history watcher refreshes this tab when the selected chat is saved.
@@ -127,7 +139,7 @@ The parser accepts the observed JSON array of log lines, plain-text results (inc
 
 **Show returned log text** reveals the bounded saved portion as plain text; **Hide returned log text** clears it from the rendered view. Failed or missing responses expose no preview. The preview can contain sensitive log values and is not scrubbed for secrets. A returned Azure DevOps build-results link is offered only when its `buildId` matches the request; other query parameters and fragments are removed. Filter by build/log ID or project, use **Show more** after 50 calls, and switch sessions to clear old entries and previews. No pipeline is run and no log content is fetched again.
 
-Both new tabs work without an editor open, refresh with the selected saved chat, and remain visible when file colours are toggled off. Six tabs support arrow keys and Home/End and wrap in narrow sidebars. All exports omit snippet/log preview text; redacted exports also omit queries, scopes, match metadata, IDs, and other external-resource metadata. Real saved search-result and log-line-array envelopes were validated locally using aggregate-only output, alongside synthetic UI/security/edge-case tests. This does not guarantee compatibility with every MCP server version or prove model consumption.
+These tabs work without an editor open, refresh with the selected saved chat, and remain visible when file colours are toggled off. Seven tabs support arrow keys and Home/End and wrap in narrow sidebars. All exports omit snippet/log preview text; redacted exports also omit queries, scopes, match metadata, IDs, and other external-resource metadata. Real saved search-result and log-line-array envelopes were validated locally using aggregate-only output, alongside synthetic UI/security/edge-case tests. This does not guarantee compatibility with every MCP server version or prove model consumption.
 
 ## Optional Instrumented Tracker
 
@@ -171,8 +183,8 @@ Browse and open files in the normal Explorer. Right-click a file there and choos
 |---------|---------|
 | `npm run check-types` | Strict TypeScript validation. |
 | `npm run compile` | Compile tests and bundle the extension. |
-| `npm run test:unit` | Twenty-three tests covering code-search scope/matches/snippets, log IDs/ranges/text, saved UTF-8 attachments, repository read-line mapping, wiki sections, preview limits/redaction, work items, file coverage, history replay, scope, persistence, and attribution. |
-| `npm run test:extension` | All five Azure DevOps activity tabs, opt-in escaped previews, provenance, filtering/pagination, six-tab keyboard navigation, session isolation and live history updates; existing heatmap, grouped picker, and restart persistence checks. |
+| `npm run test:unit` | Twenty-four tests covering timeline ordering/aggregation, code-search scope/matches/snippets, log IDs/ranges/text, saved UTF-8 attachments, repository read-line mapping, wiki sections, preview limits/redaction, work items, file coverage, history replay, scope, persistence, and attribution. |
+| `npm run test:extension` | The unified timeline and all five Azure DevOps activity tabs, opt-in escaped previews, provenance, filtering/pagination, seven-tab keyboard navigation, session isolation and live history updates; existing heatmap, grouped picker, and restart persistence checks. |
 | `npm run package` | Produce a self-contained VSIX without runtime npm installation. |
 
 The host test runner downloads VS Code 1.100.0 by default. To use an installed executable in PowerShell, set `$env:VSCODE_EXECUTABLE_PATH` to the full path of its executable before running the test command. Tests use temporary workspaces/profiles, and screenshots are written to the ignored `.vscode-test/screenshots` directory. TypeScript validation is temporarily disabled in the test profile so placeholder-code diagnostics do not override filename palette checks; normal user settings are untouched. Only the test windows expose local debugging endpoints; the extension does not start a server.

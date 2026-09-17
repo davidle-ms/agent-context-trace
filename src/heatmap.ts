@@ -91,8 +91,8 @@ body {
 * { box-sizing: border-box; }
 #content { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
 #content[hidden], #work-items[hidden], #position[hidden] { display: none; }
-#tabs { display: flex; flex-wrap: wrap; flex-shrink: 0; border-bottom: 1px solid var(--cp-border); gap: 4px 12px; }
-#tabs button { border: 0; border-bottom: 2px solid var(--cp-bg); padding: 5px 0; background: var(--cp-bg); color: var(--cp-text-muted); cursor: pointer; font: inherit; }
+#tabs { display: flex; flex-wrap: wrap; flex-shrink: 0; border-bottom: 1px solid var(--cp-border); gap: 3px 8px; }
+#tabs button { border: 0; border-bottom: 2px solid var(--cp-bg); padding: 4px 0; background: var(--cp-bg); color: var(--cp-text-muted); cursor: pointer; font: inherit; font-size: 11px; }
 #tabs button[aria-selected="true"] { border-bottom-color: var(--cp-single-edge); color: var(--cp-text); }
 button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visible { outline: 1px solid var(--cp-border-strong); outline-offset: 2px; }
 #work-items { flex: 1; min-height: 0; overflow: auto; }
@@ -118,6 +118,38 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .resource-filter { width: 100%; padding: 5px 6px; margin: 8px 0; border: 1px solid var(--cp-border); background: var(--cp-surface); color: var(--cp-text); font: inherit; border-radius: 2px; }
 .resource-panel button { margin: 8px 0; border: 1px solid var(--cp-border); border-radius: 2px; padding: 4px 8px; color: var(--cp-text); background: var(--cp-surface); cursor: pointer; }
 .resource-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; background: var(--cp-surface); color: var(--cp-text); padding: 8px; font: 11px/16px Consolas, monospace; }
+.timeline-panel { flex: 1; min-height: 0; overflow: auto; }
+.timeline-panel[hidden] { display: none; }
+.timeline-panel h2 { font-size: 12px; margin: 6px 0; }
+.timeline-note, .timeline-summary, .timeline-empty { color: var(--cp-text-muted); font-size: 11px; margin: 8px 0; overflow-wrap: anywhere; }
+.timeline-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; margin: 8px 0; }
+.timeline-controls input, .timeline-controls select { min-width: 0; padding: 5px 6px; border: 1px solid var(--cp-border); background: var(--cp-surface); color: var(--cp-text); font: inherit; border-radius: 2px; }
+.timeline-list { position: relative; margin-left: 7px; border-left: 1px solid var(--cp-border); }
+.timeline-entry, .timeline-group { --timeline-color: #626262; --timeline-marker-fg: #fff; position: relative; margin: 0; padding: 8px 0 10px 18px; overflow-wrap: anywhere; }
+.timeline-entry[data-kind="local"], .timeline-group[data-kind="local"] { --timeline-color: #916900; }
+.timeline-entry[data-kind="work-item"], .timeline-group[data-kind="work-item"] { --timeline-color: #286bb3; }
+.timeline-entry[data-kind="repository"], .timeline-group[data-kind="repository"] { --timeline-color: #287858; }
+.timeline-entry[data-kind="wiki"], .timeline-group[data-kind="wiki"] { --timeline-color: #7a4b96; }
+.timeline-entry[data-kind="search"], .timeline-group[data-kind="search"] { --timeline-color: #a54c20; }
+.timeline-entry[data-kind="logs"], .timeline-group[data-kind="logs"] { --timeline-color: #626262; }
+.timeline-marker { position: absolute; left: -9px; top: 9px; display: grid; place-items: center; width: 17px; height: 17px; border: 2px solid var(--timeline-color); border-radius: 50%; background: var(--timeline-color); color: var(--timeline-marker-fg); font: bold 9px/1 var(--vscode-font-family, "Segoe UI", sans-serif); }
+.timeline-marker[data-outcome="unavailable"], .timeline-marker[data-outcome="pending"] { background: var(--cp-bg); color: var(--timeline-color); border-style: dashed; }
+.timeline-marker[data-outcome="failed"], .timeline-marker[data-outcome="cancelled"] { border-radius: 2px; transform: rotate(45deg); }
+.timeline-marker[data-outcome="failed"] span, .timeline-marker[data-outcome="cancelled"] span { transform: rotate(-45deg); }
+.timeline-group { padding-bottom: 4px; }
+.timeline-group > summary { display: block; list-style: none; cursor: pointer; }
+.timeline-group > summary::-webkit-details-marker { display: none; }
+.timeline-group > summary .timeline-title::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 7px; border-right: 1px solid var(--timeline-color); border-bottom: 1px solid var(--timeline-color); transform: translateY(-2px) rotate(45deg); }
+.timeline-group[open] > summary .timeline-title::after { transform: translateY(1px) rotate(225deg); }
+.timeline-group-items { margin: 7px 0 0 1px; border-left: 1px dashed var(--timeline-color); }
+.timeline-group-items .timeline-entry { padding-left: 14px; }
+.timeline-group-items .timeline-entry .timeline-marker { display: none; }
+.timeline-time { color: var(--cp-text-muted); font-size: 10px; }
+.timeline-title { margin: 2px 0; font-size: 12px; line-height: 16px; }
+.timeline-detail { margin: 2px 0; color: var(--cp-text-muted); font-size: 11px; white-space: pre-wrap; }
+.timeline-kind { color: var(--cp-text-muted); font-size: 10px; text-transform: uppercase; }
+.timeline-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.timeline-actions button, #timeline-more { margin: 5px 0; border: 1px solid var(--cp-border); border-radius: 2px; padding: 3px 7px; color: var(--cp-text); background: var(--cp-surface); cursor: pointer; }
 #status, #empty { color: var(--cp-text-muted); overflow-wrap: anywhere; flex-shrink: 0; }
 #status { font-size: 11px; max-height: 3.6em; overflow: auto; }
 #filename { margin: 0; font-size: 12px; line-height: 16px; overflow-wrap: anywhere; flex-shrink: 0; }
@@ -146,7 +178,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
   #position { height: 32px; }
 }
 </style></head><body>
-<div id="tabs" role="tablist" aria-label="Recorded context"><button id="file-tab" role="tab" aria-selected="true" aria-controls="content">File Heatmap</button><button id="work-tab" role="tab" aria-selected="false" aria-controls="work-items" tabindex="-1">Work Items</button><button id="repository-tab" role="tab" aria-selected="false" aria-controls="repository-panel" tabindex="-1">Repository Files</button><button id="wiki-tab" role="tab" aria-selected="false" aria-controls="wiki-panel" tabindex="-1">Wiki Pages</button><button id="search-tab" role="tab" aria-selected="false" aria-controls="search-panel" tabindex="-1">Code Searches</button><button id="logs-tab" role="tab" aria-selected="false" aria-controls="logs-panel" tabindex="-1">Pipeline Logs</button></div>
+<div id="tabs" role="tablist" aria-label="Recorded context"><button id="file-tab" role="tab" aria-selected="true" aria-controls="content">File Heatmap</button><button id="timeline-tab" role="tab" aria-selected="false" aria-controls="timeline-panel" tabindex="-1">Timeline</button><button id="work-tab" role="tab" aria-selected="false" aria-controls="work-items" tabindex="-1">Work Items</button><button id="repository-tab" role="tab" aria-selected="false" aria-controls="repository-panel" tabindex="-1">Repository Files</button><button id="wiki-tab" role="tab" aria-selected="false" aria-controls="wiki-panel" tabindex="-1">Wiki Pages</button><button id="search-tab" role="tab" aria-selected="false" aria-controls="search-panel" tabindex="-1">Code Searches</button><button id="logs-tab" role="tab" aria-selected="false" aria-controls="logs-panel" tabindex="-1">Pipeline Logs</button></div>
 <div id="content" role="tabpanel" aria-labelledby="file-tab">
 <div id="status"></div><h2 id="filename">No file open</h2>
 <div id="scale" aria-label="Recorded reads"><span class="single"><i></i>1</span><span class="repeat"><i></i>2-3</span><span class="frequent"><i></i>4-7</span><span class="intense"><i></i>8+</span></div>
@@ -157,6 +189,14 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 <div id="viewport"></div><div id="pointer" hidden></div></div>
 </div>
 <div id="position" aria-live="polite"></div>
+<section id="timeline-panel" class="timeline-panel" role="tabpanel" aria-labelledby="timeline-tab" hidden>
+<h2>Agent Evidence Timeline</h2>
+<div class="timeline-note">Recorded evidence only. Saved history does not currently provide verified edit or terminal-command provenance.</div>
+<div id="timeline-summary" class="timeline-summary"></div>
+<div class="timeline-controls"><input id="timeline-filter" type="search" aria-label="Filter evidence timeline" placeholder="Filter path, query, ID or outcome">
+<select id="timeline-kind" aria-label="Filter evidence type"><option value="">All evidence</option><option value="local">Local files</option><option value="work-item">Work items</option><option value="repository">Repository files</option><option value="wiki">Wiki pages</option><option value="search">Code searches</option><option value="logs">Pipeline logs</option></select></div>
+<div id="timeline-empty" class="timeline-empty"></div><div id="timeline-list" class="timeline-list"></div><button id="timeline-more" hidden>Show more</button>
+</section>
 <section id="work-items" role="tabpanel" aria-labelledby="work-tab" hidden>
 <h2 id="work-heading">Azure DevOps / Work Items</h2>
 <div id="work-summary"></div><input id="work-filter" type="search" aria-label="Filter work-item activity" placeholder="Filter ID, title, project or field">
@@ -186,7 +226,7 @@ const context = canvas.getContext('2d');
 let workState = { entries: [], empty: 'No session selected' };
 let workLimit = 50;
 let workSignature = '';
-const tabs = [['file-tab', 'content'], ['work-tab', 'work-items'], ['repository-tab', 'repository-panel'], ['wiki-tab', 'wiki-panel'], ['search-tab', 'search-panel'], ['logs-tab', 'logs-panel']];
+const tabs = [['file-tab', 'content'], ['timeline-tab', 'timeline-panel'], ['work-tab', 'work-items'], ['repository-tab', 'repository-panel'], ['wiki-tab', 'wiki-panel'], ['search-tab', 'search-panel'], ['logs-tab', 'logs-panel']];
 function chooseTab(tabId) {
   byId('position').hidden = tabId !== 'file-tab';
   for (const [id, panel] of tabs) {
@@ -205,6 +245,94 @@ byId('tabs').addEventListener('keydown', event => {
   chooseTab(tabs[index][0]); byId(tabs[index][0]).focus();
 });
 const outcomes = { returned: 'Response metadata returned', unavailable: 'Response metadata unavailable', failed: 'Failed call', cancelled: 'Cancelled or denied', pending: 'Incomplete or unconfirmed call' };
+const timelineKinds = { local: 'Local file', 'work-item': 'Work item', repository: 'Repository file', wiki: 'Wiki page', search: 'Code search', logs: 'Pipeline log' };
+const timelineIcons = { local: 'F', 'work-item': '#', repository: 'R', wiki: 'W', search: 'S', logs: '>' };
+let timelineState = { entries: [], empty: 'No session selected' };
+let timelineLimit = 50;
+let timelineSignature = '';
+function jumpToTimelineEvidence(item) {
+  if (item.kind === 'local') return;
+  chooseTab(item.tab);
+  if (item.kind === 'work-item') {
+    byId('work-filter').value = ''; workLimit = Math.max(workLimit, workState.entries.length); renderWorkItems();
+    const entry = [...byId('work-list').children].find(element => element.dataset.key?.startsWith(item.callId + ':'));
+    if (entry) { entry.open = true; entry.scrollIntoView({ block: 'nearest' }); entry.querySelector('summary')?.focus(); }
+    return;
+  }
+  byId(item.kind + '-filter').value = ''; resourceLimits[item.kind] = Math.max(resourceLimits[item.kind], resourceState.entries.length); renderResources(item.kind);
+  const entry = [...byId(item.kind + '-list').children].find(element => element.dataset.key === item.callId);
+  if (entry) { if (entry.tagName === 'DETAILS') entry.open = true; entry.scrollIntoView({ block: 'nearest' }); entry.querySelector('summary, h3')?.focus(); }
+}
+function timelineOutcomeLabel(outcome) { return outcome === 'recorded' ? 'Read recorded' : outcomes[outcome]; }
+function timelineMarker(kind, outcome) {
+  const marker = document.createElement('span'); marker.className = 'timeline-marker'; marker.dataset.outcome = outcome;
+  marker.setAttribute('aria-hidden', 'true');
+  const icon = document.createElement('span'); icon.textContent = timelineIcons[kind]; marker.append(icon); return marker;
+}
+function appendTimelineEntry(container, item) {
+  const entry = document.createElement('article'); entry.className = 'timeline-entry'; entry.dataset.key = item.key; entry.dataset.kind = item.kind;
+  const time = document.createElement('time'); time.className = 'timeline-time'; time.textContent = item.at ? new Date(item.at).toLocaleString() : 'Time unavailable'; if (item.at) time.dateTime = item.at;
+  const label = document.createElement('div'); label.className = 'timeline-kind'; label.textContent = timelineKinds[item.kind] + ' | ' + timelineOutcomeLabel(item.outcome);
+  const title = document.createElement('h3'); title.className = 'timeline-title'; title.textContent = item.title;
+  const detail = document.createElement('p'); detail.className = 'timeline-detail'; detail.textContent = item.detail;
+  const actions = document.createElement('div'); actions.className = 'timeline-actions';
+  if (item.kind === 'local') {
+    for (const target of item.targets || []) {
+      const button = document.createElement('button'); button.textContent = 'Open ' + target.relativePath;
+      button.addEventListener('click', () => {
+        chooseTab('file-tab');
+        api.postMessage({ type: 'openTimelineLocal', sessionId: timelineState.sessionId,
+          callId: item.callId, rootId: target.rootId, relativePath: target.relativePath });
+      }); actions.append(button);
+    }
+  } else {
+    const button = document.createElement('button'); button.textContent = 'View details';
+    button.addEventListener('click', () => jumpToTimelineEvidence(item)); actions.append(button);
+  }
+  entry.append(timelineMarker(item.kind, item.outcome), time, label, title, detail, actions); container.append(entry);
+}
+function timelineSecond(at) {
+  const value = at ? new Date(at).getTime() : Number.NaN;
+  return Number.isFinite(value) ? Math.floor(value / 1000) : undefined;
+}
+function groupTimelineEntries(entries) {
+  const groups = [];
+  for (const item of entries) {
+    const previous = groups.at(-1);
+    const second = timelineSecond(item.at);
+    if (second !== undefined && previous?.second === second && previous.kind === item.kind) previous.entries.push(item);
+    else groups.push({ at: item.at, second, kind: item.kind, entries: [item] });
+  }
+  return groups;
+}
+function renderTimeline() {
+  const entries = timelineState.entries;
+  byId('timeline-tab').textContent = 'Timeline' + (entries.length ? ' (' + entries.length + ')' : '');
+  byId('timeline-summary').textContent = entries.length + ' evidence event' + (entries.length === 1 ? '' : 's') + ' | oldest to newest | saved history (best effort)';
+  const query = byId('timeline-filter').value.trim().toLowerCase();
+  const kind = byId('timeline-kind').value;
+  const filtered = entries.filter(item => (!kind || item.kind === kind) && [item.kind, item.title, item.detail, item.outcome].join(' ').toLowerCase().includes(query));
+  byId('timeline-empty').textContent = !entries.length ? timelineState.empty : !filtered.length ? 'No matching evidence' : '';
+  const fragment = document.createDocumentFragment();
+  for (const group of groupTimelineEntries(filtered.slice(0, timelineLimit))) {
+    if (group.entries.length === 1) { appendTimelineEntry(fragment, group.entries[0]); continue; }
+    const outcomesInGroup = [...new Set(group.entries.map(item => timelineOutcomeLabel(item.outcome)))];
+    const groupView = document.createElement('details'); groupView.className = 'timeline-group'; groupView.dataset.kind = group.kind;
+    const summary = document.createElement('summary');
+    const time = document.createElement('time'); time.className = 'timeline-time'; time.textContent = new Date(group.at).toLocaleString(); time.dateTime = group.at;
+    const label = document.createElement('div'); label.className = 'timeline-kind'; label.textContent = timelineKinds[group.kind] + ' | ' + outcomesInGroup.join(', ');
+    const title = document.createElement('h3'); title.className = 'timeline-title'; title.textContent = group.entries.length + ' consecutive events';
+    summary.append(timelineMarker(group.kind, group.entries.some(item => ['failed', 'cancelled'].includes(item.outcome)) ? 'failed'
+      : group.entries.some(item => ['unavailable', 'pending'].includes(item.outcome)) ? 'unavailable' : group.entries[0].outcome), time, label, title);
+    const children = document.createElement('div'); children.className = 'timeline-group-items';
+    for (const item of group.entries) appendTimelineEntry(children, item);
+    groupView.append(summary, children); fragment.append(groupView);
+  }
+  byId('timeline-list').replaceChildren(fragment); byId('timeline-more').hidden = filtered.length <= timelineLimit;
+}
+byId('timeline-filter').addEventListener('input', () => { timelineLimit = 50; renderTimeline(); });
+byId('timeline-kind').addEventListener('change', () => { timelineLimit = 50; renderTimeline(); });
+byId('timeline-more').addEventListener('click', () => { timelineLimit += 50; renderTimeline(); });
 function renderWorkItems() {
   const entries = workState.entries;
   const calls = new Set(entries.map(item => item.callId)).size;
@@ -498,6 +626,11 @@ canvas.addEventListener('keydown', event => {
 });
 window.addEventListener('message', event => {
   const message = event.data;
+  if (message.type === 'timeline') {
+    const signature = JSON.stringify(message); if (signature === timelineSignature) return;
+    if (message.sessionId !== timelineState.sessionId) { byId('timeline-filter').value = ''; byId('timeline-kind').value = ''; timelineLimit = 50; }
+    timelineState = message; timelineSignature = signature; renderTimeline(); return;
+  }
   if (message.type === 'resources') {
     const signature = JSON.stringify(message); if (signature === resourceSignature) return;
     if (message.sessionId !== resourceState.sessionId) for (const kind of resourceKinds) {

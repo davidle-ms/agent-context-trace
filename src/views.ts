@@ -6,6 +6,7 @@ import { heatmapHtml } from './heatmap';
 import { workItemLink } from './work-items';
 import { resourceLink, resourceMetadata } from './resource-history';
 import { repositoryReadLinesHtml } from './read-lines';
+import { evidenceTimeline } from './timeline';
 
 const frequencyColors = {
     single: { background: 'readSectionBackground', border: 'readSectionBorder', filename: 'readFileForeground' },
@@ -219,6 +220,16 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
             const value = message as Record<string, unknown>;
             if (value.type === 'ready') { this.refreshHeatmap(); }
             else if (value.type === 'navigate') { this.navigateHeatmap(value); }
+            else if (value.type === 'openTimelineLocal' && value.sessionId === this.history?.id
+                && typeof value.callId === 'string' && typeof value.rootId === 'string' && typeof value.relativePath === 'string') {
+                const activity = this.history?.events.find(event => event.id === value.callId && event.rootId === value.rootId
+                    && event.relativePath === value.relativePath);
+                const root = activity && this.roots.find(candidate => candidate.id === activity.rootId);
+                if (activity && root) {
+                    void resolveFile(path.join(root.directory, activity.relativePath), this.roots).then(result =>
+                        vscode.workspace.openTextDocument(result.filePath)).then(document => vscode.window.showTextDocument(document));
+                }
+            }
             else if (value.type === 'openWorkItem' && value.sessionId === this.history?.id) {
                 const activity = this.history?.workItems?.find(item => item.callId === value.callId && item.itemId === value.itemId);
                 const link = activity?.itemId ? workItemLink(activity.url, activity.itemId) : undefined;
@@ -273,6 +284,10 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
             entries: session?.coverage === 'copilot-history-read-metadata' ? resourceMetadata(session.resources ?? []) : [],
             empty: !session ? 'No session selected' : session.coverage !== 'copilot-history-read-metadata'
                 ? 'External activity is available for saved Copilot chats.' : 'No supported calls saved in this session.' });
+        void this.webview?.webview.postMessage({ type: 'timeline', sessionId: session?.id,
+            entries: session?.coverage === 'copilot-history-read-metadata' ? evidenceTimeline(session) : [],
+            empty: !session ? 'No session selected' : session.coverage !== 'copilot-history-read-metadata'
+                ? 'The evidence timeline is available for saved Copilot chats.' : 'No supported evidence saved in this session.' });
     }
 
     private heatmapTarget(): vscode.TextEditor | undefined {

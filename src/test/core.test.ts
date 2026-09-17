@@ -10,10 +10,39 @@ import { extractHistory, replayHistory, readHistory, listHistory, historyStatus,
 import { extractWorkItemActivity, workItemLink, redactWorkItemActivity } from '../work-items';
 import { extractResourceActivity, resourceLink, resourceMetadata, redactResourceActivity } from '../resource-history';
 import { repositoryReadLines, repositoryReadLinesHtml } from '../read-lines';
+import { evidenceTimeline } from '../timeline';
 
 const input = { sessionId: randomUUID(), filePath: '/workspace/source.ts', startLine: 1, endLine: 3 };
 const event = (startLine = 1, endLine = 10): ReadEvent => ({ id: randomUUID(), rootId: hash('root'), relativePath: 'source.ts',
     startLine, endLine, requestedEndLine: endLine, snapshotHash: hash('snapshot'), isDirty: false, at: new Date().toISOString() });
+
+test('evidence timeline deduplicates calls and orders saved evidence chronologically', () => {
+    const session = {
+        id: 'copilot:timeline', label: 'Timeline', createdAt: '', coverage: 'copilot-history-read-metadata' as const,
+        recognizedCalls: 2, unmappedCalls: 0,
+        events: [
+            { id: 'local-call', rootId: 'root', relativePath: 'src/one.ts', startLine: 2, endLine: 4, at: '2026-09-17T03:00:00Z' },
+            { id: 'local-call', rootId: 'root', relativePath: 'src/two.ts', at: '2026-09-17T03:00:00Z' }
+        ],
+        workItems: [
+            { callId: 'work-call', toolId: 'wit', server: 'ADO', operation: 'get_batch' as const, itemId: 12,
+                requestedFields: [], returnedFields: [], outcome: 'returned' as const, at: '2026-09-17T01:00:00Z' },
+            { callId: 'work-call', toolId: 'wit', server: 'ADO', operation: 'get_batch' as const, itemId: 13,
+                requestedFields: [], returnedFields: [], outcome: 'unavailable' as const, at: '2026-09-17T01:00:00Z' }
+        ],
+        resources: [{ callId: 'search-call', toolId: 'search', server: 'ADO', kind: 'search' as const, operation: 'search' as const,
+            at: '2026-09-17T02:00:00Z', outcome: 'returned' as const, evidence: 'search-matches' as const, sections: [],
+            query: 'TraceStore', returnedMatches: 3 }]
+    };
+    const entries = evidenceTimeline(session);
+    assert.deepEqual(entries.map(entry => entry.callId), ['work-call', 'search-call', 'local-call']);
+    assert.equal(entries[0]?.title, 'get_batch #12, #13');
+    assert.equal(entries[1]?.detail, '3 returned matches');
+    assert.equal(entries[2]?.title, '2 local files');
+    assert.match(entries[2]?.detail ?? '', /src\/one\.ts \(lines 2-4\)/);
+    assert.match(entries[2]?.detail ?? '', /src\/two\.ts \(range unavailable\)/);
+    assert.equal(JSON.stringify(entries).includes('preview'), false);
+});
 
 test('work-item reads preserve returned metadata, not requested-field assumptions or response bodies', () => {
     const tool = { kind: 'toolInvocationSerialized', toolId: 'mcp_azuredevops_m_wit_work_item', toolCallId: 'ado-read',

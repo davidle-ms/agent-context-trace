@@ -455,6 +455,61 @@ export async function run(): Promise<void> {
         console.log('PASS: repository/wiki tabs, revision provenance, on-demand plain-text previews, Markdown headings, keyboard tabs, filtering, and session isolation');
         const searchLogs = extractHistory({ sessionId: 'search-log-preview', customTitle: 'Synthetic code search and pipeline log preview',
             requests: [{ timestamp: '2026-09-17T10:00:00Z', response: searchLogCalls() }] }, roots);
+        const timelineSession: HistorySession = {
+            ...workSession,
+            id: 'copilot:evidence-timeline',
+            label: 'Synthetic evidence timeline',
+            events: [
+                { id: 'timeline-local-source', rootId: root.id, relativePath: 'source.ts', startLine: 2, endLine: 3, at: '2026-09-17T00:00:00.100Z' },
+                { id: 'timeline-local-neutral', rootId: root.id, relativePath: 'neutral.ts', at: '2026-09-17T00:00:00.800Z' }
+            ],
+            workItems: structuredClone(workSession.workItems),
+            resources: [...resourceSession.resources!, ...searchLogs.resources!]
+        };
+        timelineSession.workItems![0]!.title = '<img src=x onerror=alert(1)>';
+        await vscode.window.showTextDocument(neutralUri);
+        runtime.view.showHistory(timelineSession);
+        await heatmap.getByRole('tab', { name: /^Timeline/ }).click();
+        await heatmap.locator('#timeline-summary').filter({ hasText: '15 evidence events | oldest to newest' }).waitFor();
+        const timelineEntries = heatmap.locator('#timeline-list .timeline-entry');
+        assert.equal(await timelineEntries.count(), 15);
+        const localGroup = heatmap.locator('#timeline-list > .timeline-group[data-kind="local"]');
+        await localGroup.locator(':scope > summary .timeline-title').filter({ hasText: '2 consecutive events' }).waitFor();
+        assert.equal(await localGroup.getAttribute('open'), null, 'Same-second local reads start collapsed');
+        assert.equal(await localGroup.getByRole('button', { name: 'Open source.ts' }).isVisible(), false);
+        assert.match(await timelineEntries.first().locator('.timeline-kind').textContent() ?? '', /Local file/);
+        assert.match(await timelineEntries.last().locator('.timeline-kind').textContent() ?? '', /Pipeline log/);
+        const markerColors = await heatmap.locator('#timeline-list').evaluate(element => {
+            const color = (selector: string) => getComputedStyle(element.querySelector(selector)!).borderColor;
+            return { local: color('.timeline-group[data-kind="local"] > summary .timeline-marker'),
+                work: color('.timeline-group[data-kind="work-item"] > summary .timeline-marker') };
+        });
+        assert.notEqual(markerColors.local, markerColors.work, 'Evidence types use distinct marker colors');
+        assert.equal(await heatmap.locator('.timeline-group[data-kind="work-item"] > summary .timeline-marker[data-outcome="failed"]').count(), 1,
+            'A grouped failure remains visible in the group marker shape');
+        assert.equal(await heatmap.locator('#timeline-panel img, #timeline-panel script').count(), 0, 'Timeline labels are rendered as text only');
+        assert.equal((await heatmap.locator('#timeline-panel').textContent())?.includes('SAMPLE_SOURCE_ONLY'), false, 'Saved response bodies do not enter the timeline payload');
+        assert.equal((await heatmap.locator('#timeline-panel').textContent())?.includes('PRIVATE_BODY'), false);
+        await heatmap.locator('#timeline-kind').selectOption('repository');
+        assert.equal(await timelineEntries.count(), 2);
+        await heatmap.locator('#timeline-filter').fill('checkout.ts');
+        assert.equal(await timelineEntries.count(), 2, 'Path filtering retains each matching call outcome');
+        await heatmap.locator('#timeline-filter').fill('c0ffee123');
+        assert.equal(await timelineEntries.count(), 1);
+        await heatmap.locator('#timeline-filter').fill('');
+        await heatmap.locator('#timeline-list > .timeline-group[data-kind="repository"] > summary').click();
+        await timelineEntries.first().getByRole('button', { name: 'View details' }).click();
+        assert.equal(await heatmap.locator('#repository-tab').getAttribute('aria-selected'), 'true');
+        assert.equal(await heatmap.locator('#repository-list > .work-entry').first().getAttribute('open'), '');
+        await heatmap.getByRole('tab', { name: /^Timeline/ }).click();
+        await heatmap.locator('#timeline-kind').selectOption('local');
+        await localGroup.locator(':scope > summary').click();
+        assert.equal(await localGroup.getByRole('button', { name: 'Open source.ts' }).isVisible(), true);
+        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'agent-evidence-timeline.png') });
+        await timelineEntries.getByRole('button', { name: 'Open source.ts' }).click();
+        await heatmap.locator('#filename').filter({ hasText: 'source.ts' }).waitFor();
+        assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), sourceUri.toString());
+        console.log('PASS: evidence timeline ordering, aggregation, text safety, filtering, local opening, and ADO detail navigation');
         runtime.view.showHistory(searchLogs);
         await heatmap.getByRole('tab', { name: /^Code Searches/ }).click();
         await heatmap.locator('#search-summary').filter({ hasText: '2 recorded calls' }).waitFor();
