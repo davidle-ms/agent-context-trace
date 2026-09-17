@@ -73,6 +73,16 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
             this.disposables.push(decoration);
         }
         this.disposables.push(
+            vscode.languages.registerHoverProvider({ scheme: 'file' }, {
+                provideHover: (document, position, token) => {
+                    const editor = this.heatmapTarget();
+                    if (!token.isCancellationRequested && this.enabled && this.webview?.visible
+                        && editor?.document === document && (this.history || this.selectedId)) {
+                        void this.webview.webview.postMessage({ type: 'hover', token: this.heatmapToken, line: position.line + 1 });
+                    }
+                    return undefined;
+                }
+            }),
             vscode.window.onDidChangeActiveTextEditor(editor => {
                 if (editor || !vscode.window.visibleTextEditors.includes(this.heatmapEditor!)) { this.heatmapEditor = editor; }
                 this.refreshHeatmap();

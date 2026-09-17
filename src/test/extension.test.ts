@@ -174,13 +174,17 @@ export async function run(): Promise<void> {
             const spacing = await canvas.evaluate(element => {
                 const bounds = element.getBoundingClientRect();
                 const scale = globalThis.document.getElementById('scale')!.getBoundingClientRect();
+                const content = globalThis.document.getElementById('content')!.getBoundingClientRect();
                 const readout = globalThis.document.getElementById('position')!.getBoundingClientRect();
                 const labels = Array.from(globalThis.document.querySelectorAll('.line-label')).map(label => label.getBoundingClientRect());
-                return { height: bounds.height, above: bounds.top - scale.bottom, below: readout.top - bounds.bottom,
+                return { height: bounds.height, above: bounds.top - scale.bottom,
+                    below: parseFloat(getComputedStyle(globalThis.document.getElementById('map')!).marginBottom),
+                    readoutVisible: readout.top >= content.bottom && readout.bottom <= window.innerHeight && readout.height >= 32,
                     labelsSeparated: labels.every((label, index) => index === 0 || label.top >= labels[index - 1]!.bottom) };
             });
             assert.ok(spacing.height >= 320, 'Heatmap stays at least 320px tall even in a short section');
             assert.ok(spacing.above >= 20 && spacing.below >= 20, 'Heatmap has readable space above and below');
+            assert.ok(spacing.readoutVisible, 'Hover counter stays visible below the scrolling map, including short sections');
             assert.ok(spacing.labelsSeparated, 'Line labels do not collide in compact or expanded views');
         };
         await verifyHeatmapSpacing();
@@ -378,6 +382,22 @@ export async function run(): Promise<void> {
         assert.equal(runtime.view.selected()?.events.length, 8, 'Heatmap navigation never records reads');
         assert.match(await heatmap.locator('#position').textContent() ?? '', /Historical range; file may have changed/);
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'file-heatmap-hover.png') });
+        const beforeEditorHover = longEditor.visibleRanges.map(range => [range.start.line, range.end.line]);
+        for (const [line, count] of [[180, 4], [181, 8], [182, 8]] as const) {
+            await page.locator('.monaco-editor .view-lines .view-line').getByText(`value${line}`, { exact: true }).first().hover();
+            await heatmap.locator('#position').filter({ hasText: `Line ${line} / 240 | ${count} recorded reads` }).waitFor();
+            assert.ok(longEditor.selection.isEqual(selectionBefore), 'Editor hover updates the counter without moving the cursor');
+            assert.deepEqual(longEditor.visibleRanges.map(range => [range.start.line, range.end.line]), beforeEditorHover,
+                'Editor hover does not navigate or scroll the source');
+            await page.keyboard.press('Escape');
+        }
+        await vscode.commands.executeCommand('vscode.executeHoverProvider', otherUri, new vscode.Position(0, 0));
+        assert.match(await heatmap.locator('#position').textContent() ?? '', /Line 182 \/ 240/,
+            'Hover requests for another file cannot overwrite the active-file counter');
+        assert.equal(longDocument.getText(), heatmapSource);
+        assert.equal(runtime.view.selected()?.events.length, 8, 'Editor hover does not record reads');
+        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'file-heatmap-editor-hover.png') });
+        console.log('PASS: live line counter from source-editor hover, unchanged selection and viewport, no synthetic reads, and active-file isolation');
         await canvas.focus();
         const topRevealed = waitForLine(1);
         await canvas.press('Home');

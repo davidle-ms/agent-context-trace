@@ -83,12 +83,13 @@ body {
   --cp-frequent-edge: var(--vscode-agentContextTrace-readFileFrequentForeground);
   --cp-intense-edge: var(--vscode-agentContextTrace-readFileIntenseForeground);
   margin: 0; padding: 8px 12px; box-sizing: border-box; height: 100vh;
-  display: flex; flex-direction: column; gap: 6px;
+  display: flex; flex-direction: column; gap: 6px; overflow: hidden;
   background: var(--cp-bg); color: var(--cp-text);
   font: var(--vscode-font-size) var(--vscode-font-family, "Segoe UI", Aptos, Calibri, sans-serif);
   letter-spacing: 0;
 }
 * { box-sizing: border-box; }
+#content { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
 #status, #empty { color: var(--cp-text-muted); overflow-wrap: anywhere; flex-shrink: 0; }
 #status { font-size: 11px; max-height: 3.6em; overflow: auto; }
 #filename { margin: 0; font-size: 12px; line-height: 16px; overflow-wrap: anywhere; flex-shrink: 0; }
@@ -111,11 +112,13 @@ body {
 #position { height: 48px; flex-shrink: 0; font-size: 11px; line-height: 16px; white-space: pre-line; overflow: auto; overflow-wrap: anywhere; color: var(--cp-text-muted); }
 @media (max-height: 260px) {
   body { padding: 4px 10px; gap: 3px; }
+  #content { gap: 3px; }
   #status { height: 14px; line-height: 14px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   #filename { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #position { height: 32px; }
 }
 </style></head><body>
+<div id="content">
 <div id="status"></div><h2 id="filename">No file open</h2>
 <div id="scale" aria-label="Recorded reads"><span class="single"><i></i>1</span><span class="repeat"><i></i>2-3</span><span class="frequent"><i></i>4-7</span><span class="intense"><i></i>8+</span></div>
 <div id="empty">No file open</div>
@@ -123,6 +126,7 @@ body {
 <canvas id="heatmap" role="slider" tabindex="0" aria-label="File line heatmap" aria-orientation="vertical" aria-valuemin="1"></canvas>
 <div id="guides" aria-hidden="true"></div>
 <div id="viewport"></div><div id="pointer" hidden></div></div>
+</div>
 <div id="position" aria-live="polite"></div>
 <script nonce="${nonce}">
 const api = acquireVsCodeApi();
@@ -191,8 +195,8 @@ function drawViewport() {
     byId('viewport').style.height = ((visible.endLine - visible.startLine + 1) / state.lineCount * 100) + '%';
   }
 }
-function point(line, focus = false) {
-  if (!state?.navigable) return;
+function showLine(line) {
+  if (!state?.navigable || !Number.isInteger(line)) return false;
   currentLine = Math.max(1, Math.min(state.lineCount, line));
   byId('pointer').hidden = false;
   byId('pointer').style.top = ((currentLine - 0.5) / state.lineCount * 100) + '%';
@@ -203,6 +207,10 @@ function point(line, focus = false) {
   byId('position').textContent = label + '\\n' + provenance;
   canvas.setAttribute('aria-valuenow', String(currentLine));
   canvas.setAttribute('aria-valuetext', label + '. ' + provenance);
+  return true;
+}
+function point(line, focus = false) {
+  if (!showLine(line)) return;
   pending = { type: 'navigate', token: state.token, line: currentLine, focus };
   if (focus) { clearTimeout(timer); timer = undefined; }
   if (!timer) timer = setTimeout(() => { timer = undefined; if (pending) api.postMessage(pending); pending = undefined; }, focus ? 0 : 30);
@@ -225,6 +233,7 @@ canvas.addEventListener('keydown', event => {
 window.addEventListener('message', event => {
   const message = event.data;
   if (message.type === 'viewport' && state?.token === message.token) { state.visible = message.visible; drawViewport(); return; }
+  if (message.type === 'hover' && state?.token === message.token) { showLine(message.line); return; }
   if (message.type !== 'state') return;
   state = message;
   clearTimeout(timer); timer = undefined; pending = undefined;
