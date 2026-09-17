@@ -99,15 +99,15 @@ body {
 .repeat { --edge: var(--cp-repeat-edge); --shade: var(--cp-repeat); }
 .frequent { --edge: var(--cp-frequent-edge); --shade: var(--cp-frequent); }
 .intense { --edge: var(--cp-intense-edge); --shade: var(--cp-intense); }
-#map { flex: 1; min-height: 24px; position: relative; margin-left: 34px; }
+#map { flex: 1; min-height: 24px; position: relative; margin: 20px 0 20px 34px; }
 #map[hidden], #empty[hidden] { display: none; }
 #heatmap { width: 100%; height: 100%; position: absolute; display: block; cursor: crosshair; touch-action: none; background: var(--cp-surface); }
 #heatmap:focus-visible { outline: 1px solid var(--cp-border-strong); outline-offset: 2px; }
 #viewport, #pointer { pointer-events: none; position: absolute; left: 0; right: 0; }
 #viewport { border: 1px solid var(--cp-text-muted); min-height: 2px; }
 #pointer { border-top: 1px solid var(--cp-text); }
-#first, #last { position: absolute; right: calc(100% + 6px); color: var(--cp-text-muted); font-size: 10px; font-family: Consolas, monospace; }
-#first { top: 0; } #last { bottom: 0; }
+#guides { position: absolute; inset: 0; pointer-events: none; }
+.line-label { position: absolute; right: calc(100% + 6px); transform: translateY(-50%); color: var(--cp-text-muted); font: 10px/14px Consolas, monospace; white-space: nowrap; }
 #position { height: 48px; flex-shrink: 0; font-size: 11px; line-height: 16px; white-space: pre-line; overflow: auto; overflow-wrap: anywhere; color: var(--cp-text-muted); }
 @media (max-height: 260px) {
   body { padding: 4px 10px; gap: 3px; }
@@ -119,8 +119,9 @@ body {
 <div id="status"></div><h2 id="filename">No file open</h2>
 <div id="scale" aria-label="Recorded reads"><span class="single"><i></i>1</span><span class="repeat"><i></i>2-3</span><span class="frequent"><i></i>4-7</span><span class="intense"><i></i>8+</span></div>
 <div id="empty">No file open</div>
-<div id="map" hidden><span id="first">1</span><span id="last"></span>
+<div id="map" hidden>
 <canvas id="heatmap" role="slider" tabindex="0" aria-label="File line heatmap" aria-orientation="vertical" aria-valuemin="1"></canvas>
+<div id="guides" aria-hidden="true"></div>
 <div id="viewport"></div><div id="pointer" hidden></div></div>
 <div id="position" aria-live="polite"></div>
 <script nonce="${nonce}">
@@ -149,7 +150,38 @@ function draw() {
     context.fillStyle = styles.getPropertyValue('--cp-' + tier(range.readCount) + '-edge').trim();
     context.fillRect(0, top, 3, height);
   }
+  drawGuides(bounds, ratio, styles);
   drawViewport();
+}
+function drawGuides(bounds, ratio, styles) {
+  const boundaries = new Map([[0, 1], [state.lineCount, state.lineCount]]);
+  for (const range of state.ranges) boundaries.set(range.endLine, range.endLine);
+  for (const range of state.ranges) boundaries.set(range.startLine - 1, range.startLine);
+  const labels = document.createDocumentFragment();
+  const drawnRows = new Set();
+  let lastLabelTop = -Infinity;
+  context.fillStyle = styles.getPropertyValue('--cp-text-muted').trim();
+  context.globalAlpha = 0.5;
+  for (const [offset, line] of [...boundaries].sort(([left], [right]) => left - right)) {
+    const top = offset / state.lineCount * bounds.height;
+    const row = Math.min(Math.floor(top * ratio), canvas.height - 1);
+    if (!drawnRows.has(row)) {
+      context.fillRect(3, row / ratio, bounds.width - 3, 1 / ratio);
+      drawnRows.add(row);
+    }
+    const endpoint = offset === 0 || offset === state.lineCount;
+    if (!endpoint && (top - lastLabelTop < 18 || bounds.height - top < 18)) continue;
+    if (offset === state.lineCount && state.lineCount === 1) continue;
+    const label = document.createElement('span');
+    label.className = 'line-label';
+    label.textContent = String(line);
+    label.dataset.offset = String(offset);
+    label.style.top = (offset / state.lineCount * 100) + '%';
+    labels.append(label);
+    lastLabelTop = top;
+  }
+  context.globalAlpha = 1;
+  byId('guides').replaceChildren(labels);
 }
 function drawViewport() {
   const visible = state?.visible;
@@ -204,7 +236,7 @@ window.addEventListener('message', event => {
   byId('empty').textContent = state.empty;
   byId('empty').hidden = !state.empty;
   byId('map').hidden = !state.navigable;
-  byId('last').textContent = String(state.lineCount);
+  byId('map').style.marginLeft = Math.max(34, String(state.lineCount).length * 7 + 10) + 'px';
   byId('pointer').hidden = true;
   byId('position').textContent = '';
   canvas.setAttribute('aria-valuemax', String(state.lineCount || 1));

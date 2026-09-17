@@ -170,6 +170,19 @@ export async function run(): Promise<void> {
         await canvas.waitFor({ state: 'visible' });
         assert.match(await heatmap.locator('#filename').textContent() ?? '', /repo-one.*source.ts/);
         assert.equal(await canvas.evaluate(() => globalThis.document.documentElement.scrollWidth <= window.innerWidth), true, 'Compact heatmap has no horizontal overflow');
+        const verifyHeatmapSpacing = async () => {
+            const spacing = await canvas.evaluate(element => {
+                const bounds = element.getBoundingClientRect();
+                const scale = globalThis.document.getElementById('scale')!.getBoundingClientRect();
+                const readout = globalThis.document.getElementById('position')!.getBoundingClientRect();
+                const labels = Array.from(globalThis.document.querySelectorAll('.line-label')).map(label => label.getBoundingClientRect());
+                return { above: bounds.top - scale.bottom, below: readout.top - bounds.bottom,
+                    labelsSeparated: labels.every((label, index) => index === 0 || label.top >= labels[index - 1]!.bottom) };
+            });
+            assert.ok(spacing.above >= 20 && spacing.below >= 20, 'Heatmap has readable space above and below');
+            assert.ok(spacing.labelsSeparated, 'Line labels do not collide in compact or expanded views');
+        };
+        await verifyHeatmapSpacing();
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'file-heatmap-compact.png') });
         const sectionBounds = await section.boundingBox();
         assert.ok(sectionBounds);
@@ -317,6 +330,31 @@ export async function run(): Promise<void> {
                 rootId: root.id, relativePath: 'heatmap-preview.ts', startLine, endLine: 240 })) };
         runtime.view.showHistory(longSession);
         await heatmap.locator('#filename').filter({ hasText: 'heatmap-preview.ts' }).waitFor();
+        await heatmap.locator('.line-label').filter({ hasText: /^181$/ }).waitFor();
+        await verifyHeatmapSpacing();
+        const boundaryLabels = await heatmap.locator('.line-label').evaluateAll(elements => elements.map(element => ({
+            line: element.textContent, offset: Number((element as HTMLElement).dataset.offset),
+            top: parseFloat((element as HTMLElement).style.top)
+        })));
+        assert.deepEqual(boundaryLabels.map(label => label.line), ['1', '61', '121', '181', '240'], 'Numbered guides identify recorded range boundaries');
+        for (const label of boundaryLabels) {
+            assert.ok(Math.abs(label.top - label.offset / 240 * 100) < 0.01, 'Numbered guides align to source ranges');
+        }
+        const guidePixels = await canvas.evaluate(element => {
+            const map = element as HTMLCanvasElement;
+            const context = map.getContext('2d')!;
+            return [0.25, 0.5, 0.75].map(fraction => {
+                const row = Math.floor(map.height * fraction);
+                return [0.25, 0.75].map(horizontal => {
+                    const column = Math.floor(map.width * horizontal);
+                    return { boundary: Array.from(context.getImageData(column, row, 1, 1).data),
+                        inside: Array.from(context.getImageData(column, row + 2, 1, 1).data) };
+                });
+            });
+        });
+        for (const guide of guidePixels) {
+            for (const sample of guide) { assert.notDeepEqual(sample.boundary, sample.inside, 'Horizontal guides span the heatmap'); }
+        }
         const selectionBefore = longEditor.selection;
         const waitForLine = (line: number) => new Promise<void>((resolve, reject) => {
             const containsLine = () => longEditor.visibleRanges.some(range => range.start.line <= line - 1 && range.end.line >= line - 1);
