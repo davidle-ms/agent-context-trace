@@ -9,6 +9,7 @@ import { hash, ReadInput, Root, resolveFile, sliceRead, TOOL_NAME, TraceStore, v
 import { CoverageView, historyPickerItems } from './views';
 import { HistorySession, listHistory, readHistory } from './history';
 import { redactWorkItemActivity } from './work-items';
+import { redactResourceActivity } from './resource-history';
 
 let running: Runtime | undefined;
 
@@ -95,8 +96,9 @@ export class Runtime {
         register('export', async () => {
             const session = this.view.selected();
             if (!session) { throw new Error('Select a tracker session first.'); }
-            const mode = await vscode.window.showQuickPick(['Redact paths and label; omit external work-item metadata', 'Include paths, label, and work-item metadata'], { title: 'Export Metadata (No Source Content)' });
+            const mode = await vscode.window.showQuickPick(['Redact paths and label; omit external resource metadata', 'Include paths, label, and external resource metadata'], { title: 'Export Metadata (No Source Content)' });
             if (!mode) { return; }
+            if (session.coverage === 'copilot-history-read-metadata') { redactResourceActivity(session, mode.startsWith('Redact')); }
             if (mode.startsWith('Redact')) {
                 session.label = 'Redacted';
                 if (session.coverage === 'copilot-history-read-metadata') { redactWorkItemActivity(session); }
@@ -178,7 +180,7 @@ export class Runtime {
     private async chooseCopilotSession(): Promise<void> {
         this.guard();
         if (!this.context.workspaceState.get('copilotHistoryConsent', false)) {
-            const approved = await vscode.window.showWarningMessage('Read local Copilot chat history? This version-dependent adapter reads chat files from this and the default VS Code profile. They can contain prompts and source content. Derived file-read and Azure DevOps work-item metadata (including titles) is displayed; field values and comment bodies are not retained. Original chats are never modified or copied. It is not a supported Copilot API.',
+            const approved = await vscode.window.showWarningMessage('Read local Copilot chat history? This version-dependent adapter reads chat files from this and the default VS Code profile. Derived file-read and Azure DevOps work-item, repository-file, and wiki metadata is displayed. Bounded file/wiki text previews are held in memory and shown only on request; work-item field values and comment bodies are not retained. Original chats are never modified or copied. It is not a supported Copilot API.',
                 { modal: true }, 'Read Local History');
             if (approved !== 'Read Local History') { return; }
             await this.context.workspaceState.update('copilotHistoryConsent', true);

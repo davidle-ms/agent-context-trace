@@ -4,6 +4,7 @@ import { Root, ReadEvent, Session, summary, TraceStore, resolveFile, hash, MAX_F
 import { HistoryRead, HistorySession, historyStatus, HistoryEntry, groupHistory } from './history';
 import { heatmapHtml } from './heatmap';
 import { workItemLink } from './work-items';
+import { resourceLink, resourceMetadata } from './resource-history';
 
 const frequencyColors = {
     single: { background: 'readSectionBackground', border: 'readSectionBorder', filename: 'readFileForeground' },
@@ -219,6 +220,17 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
                 const link = activity?.itemId ? workItemLink(activity.url, activity.itemId) : undefined;
                 if (link) { void vscode.env.openExternal(vscode.Uri.parse(link)); }
             }
+            else if ((value.type === 'openResource' || value.type === 'showResourceContent') && value.sessionId === this.history?.id) {
+                const activity = this.history?.resources?.find(item => item.callId === value.callId && item.kind === value.kind);
+                if (!activity) { return; }
+                if (value.type === 'openResource') {
+                    const link = resourceLink(activity.url ?? activity.requestedUrl, activity.kind);
+                    if (link) { void vscode.env.openExternal(vscode.Uri.parse(link)); }
+                } else if (activity.preview !== undefined) {
+                    void view.webview.postMessage({ type: 'resourceContent', sessionId: this.history?.id, callId: activity.callId,
+                        kind: activity.kind, text: activity.preview, truncated: activity.previewTruncated });
+                }
+            }
             if (value.type === 'ready') { this.refreshWorkItems(); }
         });
         const visibility = view.onDidChangeVisibility(() => { if (view.visible) { this.refreshHeatmap(); this.refreshWorkItems(); } });
@@ -240,6 +252,10 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
             entries: session?.coverage === 'copilot-history-read-metadata' ? session.workItems ?? [] : [],
             empty: !session ? 'No session selected' : session.coverage !== 'copilot-history-read-metadata'
                 ? 'Work-item activity is available for saved Copilot chats.' : 'No supported Azure DevOps work-item calls saved in this session.' });
+        void this.webview?.webview.postMessage({ type: 'resources', sessionId: session?.id,
+            entries: session?.coverage === 'copilot-history-read-metadata' ? resourceMetadata(session.resources ?? []) : [],
+            empty: !session ? 'No session selected' : session.coverage !== 'copilot-history-read-metadata'
+                ? 'External activity is available for saved Copilot chats.' : 'No supported calls saved in this session.' });
     }
 
     private heatmapTarget(): vscode.TextEditor | undefined {

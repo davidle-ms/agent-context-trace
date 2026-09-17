@@ -8,6 +8,7 @@ import { excluded, hash, isWithin, parseSession, ReadEvent, resolveFile, sliceRe
 import { pathToFileURL } from 'node:url';
 import { extractHistory, replayHistory, readHistory, listHistory, historyStatus, groupHistory, HistoryEntry } from '../history';
 import { extractWorkItemActivity, workItemLink, redactWorkItemActivity } from '../work-items';
+import { extractResourceActivity, resourceLink, resourceMetadata, redactResourceActivity } from '../resource-history';
 
 const input = { sessionId: randomUUID(), filePath: '/workspace/source.ts', startLine: 1, endLine: 3 };
 const event = (startLine = 1, endLine = 10): ReadEvent => ({ id: randomUUID(), rootId: hash('root'), relativePath: 'source.ts',
@@ -60,6 +61,68 @@ test('work-item batches and comments retain only evidence for each requested ite
     assert.deepEqual(exported, { label: 'Redacted' });
     const mismatch = call('list_comments', { workItemId: 12 }, { comments: [{ id: 3, workItemId: 99, text: 'wrong' }] });
     assert.equal(extractWorkItemActivity({ requests: [{ response: [mismatch] }] })[0]?.outcome, 'unavailable');
+});
+
+test('repository and wiki reads distinguish requests, content evidence, ranges, and missing responses', () => {
+    const call = (kind: string, input: object, value: unknown) => ({ kind: 'toolInvocationSerialized', toolId: `mcp_azuredevops_m_${kind}`,
+        toolCallId: kind, source: { type: 'mcp' }, isConfirmed: { type: 1 }, isComplete: true,
+        toolSpecificData: { rawInput: input }, resultDetails: { output: [{ isText: true, value: JSON.stringify(value) }] } });
+    const repo = call('repo_file', { action: 'get_content', repositoryId: 'Demo', path: '/src/main.ts', version: 'main', versionType: 'Branch' },
+        { path: '/src/main.ts', content: 'PRIVATE_SOURCE\nnext', commitId: 'abc123', startLine: 7, endLine: 8 });
+    const wiki = call('wiki', { action: 'get_page', wikiIdentifier: 'Docs', path: '/Setup' }, { path: '/Setup', title: 'Setup', content: '# Setup\nPRIVATE_BODY',
+        sections: [{ title: 'Setup', startLine: 1, endLine: 2 }] });
+    const snapshot = { sessionId: 'resource-test', requests: [{ timestamp: 1000, response: [repo, wiki, repo] }] };
+    const entries = extractResourceActivity(snapshot);
+    assert.equal(entries.length, 2);
+    assert.equal(entries[0]?.requestedVersion, 'main');
+    assert.equal(entries[0]?.returnedRevision, 'abc123');
+    assert.deepEqual(entries[0]?.range, { startLine: 7, endLine: 8 });
+    assert.equal(entries[1]?.title, 'Setup');
+    assert.deepEqual(entries[1]?.sections, [{ title: 'Setup', startLine: 1, endLine: 2 }]);
+    assert.equal(JSON.stringify(resourceMetadata(entries)).includes('PRIVATE_'), false, 'Bodies are withheld from initial view messages');
+    const exported = { resources: structuredClone(entries) };
+    redactResourceActivity(exported, false);
+    assert.equal(JSON.stringify(exported).includes('PRIVATE_'), false, 'Even unredacted metadata exports omit response bodies');
+    redactResourceActivity(exported, true);
+    assert.deepEqual(exported, {});
+    assert.deepEqual(extractHistory(snapshot, []).events, [], 'Remote files do not become local coverage');
+    for (const extra of [{ isError: true }, { isCancelled: true }, { isComplete: false }, { isConfirmed: undefined }, { resultDetails: {} }]) {
+        const entry = extractResourceActivity({ requests: [{ response: [{ ...repo, ...extra }] }] })[0]!;
+        assert.equal(entry.preview, undefined);
+        assert.equal(entry.evidence, 'none');
+    }
+    const raw = { ...repo, resultDetails: { output: [{ isText: true, value: 'unstructured response' }] } };
+    const unstructured = extractResourceActivity({ requests: [{ response: [raw] }] })[0]!;
+    assert.equal(unstructured.evidence, 'text-response');
+    assert.equal(unstructured.range, undefined);
+    assert.equal(unstructured.returnedRevision, undefined);
+    const search = { ...wiki, toolId: 'mcp_azuredevops_m_search_wiki' };
+    assert.deepEqual(extractResourceActivity({ requests: [{ response: [search] }] }), []);
+    const mismatch = call('repo_file', { action: 'get_content', path: '/requested' }, { path: '/different', content: 'bad attribution' });
+    assert.equal(extractResourceActivity({ requests: [{ response: [mismatch] }] })[0]?.outcome, 'unavailable');
+    const secret = call('repo_file', { action: 'get_content', path: '/.env' }, { path: '/.env', content: 'SECRET' });
+    assert.equal(extractResourceActivity({ requests: [{ response: [secret] }] })[0]?.preview, undefined);
+    const huge = call('wiki', { action: 'get_page', path: '/Large' }, { path: '/Large', content: 'x'.repeat(20000) });
+    const limited = extractResourceActivity({ requests: [{ response: [huge] }] })[0]!;
+    assert.equal(limited.preview?.length, 16384);
+    assert.equal(limited.previewTruncated, true);
+    const markdown = call('wiki', { action: 'get_page', path: '/Guide' }, { path: '/Guide', content: '# Guide\n## Setup\n```text\n# Not a section\n```\nDetails\n-------\n' });
+    const parsedMarkdown = extractResourceActivity({ requests: [{ response: [markdown] }] })[0]!;
+    assert.equal(parsedMarkdown.title, 'Guide');
+    assert.deepEqual(parsedMarkdown.sections.map(section => section.title), ['Guide', 'Setup', 'Details']);
+    assert.equal(parsedMarkdown.sectionSource, 'returned Markdown headings');
+    assert.equal(parsedMarkdown.range, undefined, 'Heading parsing does not invent source-line provenance');
+    const budgeted = extractResourceActivity({ requests: [{ response: Array.from({ length: 34 }, (_, index) => ({ ...huge, toolCallId: `large-${index}` })) }] });
+    assert.equal(budgeted.reduce((total, entry) => total + (entry.preview?.length ?? 0), 0), 512 * 1024);
+    assert.equal(budgeted.at(-1)?.previewUnavailable, 'Session preview limit reached');
+    const metadataOnly = call('wiki', { action: 'get_page', path: '/Home', includeContent: false }, { path: '/Home', id: 3 });
+    assert.equal(extractResourceActivity({ requests: [{ response: [metadataOnly] }] })[0]?.evidence, 'metadata');
+    assert.equal(resourceLink('https://dev.azure.com/org/project/_git/repo?path=%2Fsrc%2Fmain.ts&token=SECRET', 'repository'),
+        'https://dev.azure.com/org/project/_git/repo?path=%2Fsrc%2Fmain.ts');
+    assert.equal(resourceLink('https://evil.example/_wiki/wikis/docs/1', 'wiki'), undefined);
+    assert.equal(resourceLink('javascript:alert(1)', 'repository'), undefined);
+    assert.equal(resourceLink('https://user:secret@dev.azure.com/org/project/_git/repo', 'repository'), undefined);
+    assert.equal(resourceLink('https://dev.azure.com.evil.example/org/_git/repo', 'repository'), undefined);
 });
 
 test('chat JSONL reconstructs snapshots, replacements, appends, and partial final writes', () => {

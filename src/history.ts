@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { parse, ParseError } from 'jsonc-parser';
 import { excluded, isWithin, Root } from './core';
 import { extractWorkItemActivity, WorkItemActivity } from './work-items';
+import { extractResourceActivity, ResourceActivity } from './resource-history';
 
 export const MAX_HISTORY_BYTES = 32 * 1024 * 1024;
 const MAX_HEADER_BYTES = 256 * 1024;
@@ -29,6 +30,7 @@ export interface HistorySession {
     recognizedCalls: number;
     unmappedCalls: number;
     workItems?: WorkItemActivity[];
+    resources?: ResourceActivity[];
 }
 export interface HistoryEntry { file: string; label: string; updatedAt: string; workspace: string; repositoryMatch: boolean }
 
@@ -101,6 +103,7 @@ export function historyStatus(session: HistorySession): string {
     if (session.workItems?.length) {
         return 'No supported local file reads saved. Azure DevOps activity is available in Work Items.';
     }
+    if (session.resources?.length) { return 'No supported local file reads saved. Azure DevOps activity is available in Repository Files and Wiki Pages.'; }
     return 'Local Copilot history: no completed supported file reads saved yet. Continue the chat or select another session; colors update when history is saved.';
 }
 
@@ -164,7 +167,7 @@ export function extractHistory(snapshot: JsonObject, roots: readonly Root[]): Hi
     }
     const session: HistorySession = { id: `copilot:${snapshot.sessionId}`, label: title(snapshot.customTitle, `Chat ${snapshot.sessionId.slice(0, 8)}`),
         createdAt: date(snapshot.creationDate) ?? '', coverage: 'copilot-history-read-metadata', events: [], recognizedCalls: 0, unmappedCalls: 0,
-        workItems: extractWorkItemActivity(snapshot) };
+        workItems: extractWorkItemActivity(snapshot), resources: extractResourceActivity(snapshot) };
     const calls = new Map<string, { tool: JsonObject; at?: string }>();
     for (const request of snapshot.requests) {
         if (!object(request) || !Array.isArray(request.response)) { continue; }

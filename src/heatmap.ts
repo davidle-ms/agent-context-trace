@@ -91,7 +91,7 @@ body {
 * { box-sizing: border-box; }
 #content { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
 #content[hidden], #work-items[hidden], #position[hidden] { display: none; }
-#tabs { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--cp-border); gap: 12px; }
+#tabs { display: flex; flex-wrap: wrap; flex-shrink: 0; border-bottom: 1px solid var(--cp-border); gap: 4px 12px; }
 #tabs button { border: 0; border-bottom: 2px solid var(--cp-bg); padding: 5px 0; background: var(--cp-bg); color: var(--cp-text-muted); cursor: pointer; font: inherit; }
 #tabs button[aria-selected="true"] { border-bottom-color: var(--cp-single-edge); color: var(--cp-text); }
 button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visible { outline: 1px solid var(--cp-border-strong); outline-offset: 2px; }
@@ -107,6 +107,13 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .work-entry dd { margin: 2px 0; white-space: pre-wrap; }
 .work-entry a { color: var(--cp-single-edge); font-size: 11px; }
 #work-more { margin: 8px 0; border: 1px solid var(--cp-border); border-radius: 2px; padding: 4px 8px; color: var(--cp-text); background: var(--cp-surface); cursor: pointer; }
+.resource-panel { flex: 1; min-height: 0; overflow: auto; }
+.resource-panel[hidden] { display: none; }
+.resource-panel h2 { font-size: 12px; margin: 6px 0; }
+.resource-summary, .resource-empty { color: var(--cp-text-muted); font-size: 11px; margin: 8px 0; overflow-wrap: anywhere; }
+.resource-filter { width: 100%; padding: 5px 6px; margin: 8px 0; border: 1px solid var(--cp-border); background: var(--cp-surface); color: var(--cp-text); font: inherit; border-radius: 2px; }
+.resource-panel button { margin: 8px 0; border: 1px solid var(--cp-border); border-radius: 2px; padding: 4px 8px; color: var(--cp-text); background: var(--cp-surface); cursor: pointer; }
+.resource-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; background: var(--cp-surface); color: var(--cp-text); padding: 8px; font: 11px/16px Consolas, monospace; }
 #status, #empty { color: var(--cp-text-muted); overflow-wrap: anywhere; flex-shrink: 0; }
 #status { font-size: 11px; max-height: 3.6em; overflow: auto; }
 #filename { margin: 0; font-size: 12px; line-height: 16px; overflow-wrap: anywhere; flex-shrink: 0; }
@@ -135,7 +142,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
   #position { height: 32px; }
 }
 </style></head><body>
-<div id="tabs" role="tablist" aria-label="Recorded context"><button id="file-tab" role="tab" aria-selected="true" aria-controls="content">File Heatmap</button><button id="work-tab" role="tab" aria-selected="false" aria-controls="work-items" tabindex="-1">Work Items</button></div>
+<div id="tabs" role="tablist" aria-label="Recorded context"><button id="file-tab" role="tab" aria-selected="true" aria-controls="content">File Heatmap</button><button id="work-tab" role="tab" aria-selected="false" aria-controls="work-items" tabindex="-1">Work Items</button><button id="repository-tab" role="tab" aria-selected="false" aria-controls="repository-panel" tabindex="-1">Repository Files</button><button id="wiki-tab" role="tab" aria-selected="false" aria-controls="wiki-panel" tabindex="-1">Wiki Pages</button></div>
 <div id="content" role="tabpanel" aria-labelledby="file-tab">
 <div id="status"></div><h2 id="filename">No file open</h2>
 <div id="scale" aria-label="Recorded reads"><span class="single"><i></i>1</span><span class="repeat"><i></i>2-3</span><span class="frequent"><i></i>4-7</span><span class="intense"><i></i>8+</span></div>
@@ -151,6 +158,14 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 <div id="work-summary"></div><input id="work-filter" type="search" aria-label="Filter work-item activity" placeholder="Filter ID, title, project or field">
 <div id="work-empty"></div><div id="work-list"></div><button id="work-more" hidden>Show more</button>
 </section>
+<section id="repository-panel" class="resource-panel" role="tabpanel" aria-labelledby="repository-tab" hidden>
+<h2>Azure DevOps / Repository Files</h2><div id="repository-summary" class="resource-summary"></div>
+<input id="repository-filter" class="resource-filter" type="search" aria-label="Filter repository activity" placeholder="Filter repository, path or revision">
+<div id="repository-empty" class="resource-empty"></div><div id="repository-list"></div><button id="repository-more" hidden>Show more</button></section>
+<section id="wiki-panel" class="resource-panel" role="tabpanel" aria-labelledby="wiki-tab" hidden>
+<h2>Azure DevOps / Wiki Pages</h2><div id="wiki-summary" class="resource-summary"></div>
+<input id="wiki-filter" class="resource-filter" type="search" aria-label="Filter wiki activity" placeholder="Filter wiki, page or section">
+<div id="wiki-empty" class="resource-empty"></div><div id="wiki-list"></div><button id="wiki-more" hidden>Show more</button></section>
 <script nonce="${nonce}">
 const api = acquireVsCodeApi();
 const byId = id => document.getElementById(id);
@@ -159,22 +174,23 @@ const context = canvas.getContext('2d');
 let workState = { entries: [], empty: 'No session selected' };
 let workLimit = 50;
 let workSignature = '';
-function chooseTab(work) {
-  byId('content').hidden = work;
-  byId('position').hidden = work;
-  byId('work-items').hidden = !work;
-  for (const [id, selected] of [['file-tab', !work], ['work-tab', work]]) {
+const tabs = [['file-tab', 'content'], ['work-tab', 'work-items'], ['repository-tab', 'repository-panel'], ['wiki-tab', 'wiki-panel']];
+function chooseTab(tabId) {
+  byId('position').hidden = tabId !== 'file-tab';
+  for (const [id, panel] of tabs) {
+    const selected = id === tabId;
+    byId(panel).hidden = !selected;
     byId(id).setAttribute('aria-selected', String(selected)); byId(id).tabIndex = selected ? 0 : -1;
   }
-  if (!work) requestAnimationFrame(draw);
+  if (tabId === 'file-tab') requestAnimationFrame(draw);
 }
-byId('file-tab').addEventListener('click', () => chooseTab(false));
-byId('work-tab').addEventListener('click', () => chooseTab(true));
+for (const [id] of tabs) byId(id).addEventListener('click', () => chooseTab(id));
 byId('tabs').addEventListener('keydown', event => {
   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
   event.preventDefault();
-  const work = event.key === 'End' || event.key !== 'Home' && byId('work-items').hidden;
-  chooseTab(work); byId(work ? 'work-tab' : 'file-tab').focus();
+  const current = tabs.findIndex(([id]) => byId(id).getAttribute('aria-selected') === 'true');
+  const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+  chooseTab(tabs[index][0]); byId(tabs[index][0]).focus();
 });
 const outcomes = { returned: 'Response metadata returned', unavailable: 'Response metadata unavailable', failed: 'Failed call', cancelled: 'Cancelled or denied', pending: 'Incomplete or unconfirmed call' };
 function renderWorkItems() {
@@ -226,6 +242,70 @@ function renderWorkItems() {
 }
 byId('work-filter').addEventListener('input', () => { workLimit = 50; renderWorkItems(); });
 byId('work-more').addEventListener('click', () => { workLimit += 50; renderWorkItems(); });
+let resourceState = { entries: [], empty: 'No session selected' };
+let resourceSignature = '';
+const resourceLimits = { repository: 50, wiki: 50 };
+function renderResources(kind) {
+  const entries = resourceState.entries.filter(item => item.kind === kind);
+  const names = kind === 'repository' ? 'Repository Files' : 'Wiki Pages';
+  byId(kind + '-tab').textContent = names + (entries.length ? ' (' + entries.length + ')' : '');
+  byId(kind + '-summary').textContent = entries.length + ' recorded calls | saved history (best effort)';
+  const query = byId(kind + '-filter').value.trim().toLowerCase();
+  const filtered = entries.filter(item => [item.resource, item.title, item.project, item.requestedPath, item.returnedPath,
+    item.requestedVersion, item.returnedRevision, ...item.sections.map(section => section.title)].join(' ').toLowerCase().includes(query));
+  byId(kind + '-empty').textContent = !entries.length ? resourceState.empty : !filtered.length ? 'No matching resources' : '';
+  const list = byId(kind + '-list');
+  const opened = new Set([...list.querySelectorAll('details[open]')].map(element => element.dataset.key));
+  const fragment = document.createDocumentFragment();
+  for (const item of filtered.slice(0, resourceLimits[kind])) {
+    const entry = document.createElement('details'); entry.className = 'work-entry'; entry.dataset.key = item.callId; entry.open = opened.has(item.callId);
+    const summary = document.createElement('summary'); summary.textContent = kind === 'wiki' ? item.title || item.returnedPath || item.requestedPath || 'Page unavailable'
+      : item.returnedPath || item.requestedPath || 'File path unavailable';
+    const status = document.createElement('span'); status.className = 'work-outcome';
+    status.textContent = item.operation + ' | ' + (item.outcome !== 'returned' ? outcomes[item.outcome] :
+      item.evidence === 'content' ? 'Content returned' : item.evidence === 'text-response' ? 'Text response; content identity unverified' : 'Metadata returned; no content');
+    summary.append(status); entry.append(summary);
+    const metadata = document.createElement('dl');
+    const field = (name, value) => { const term = document.createElement('dt'); term.textContent = name;
+      const detail = document.createElement('dd'); detail.textContent = value; metadata.append(term, detail); };
+    field(kind === 'wiki' ? 'Requested wiki' : 'Requested repository', item.resource || 'Unavailable');
+    field('Project', item.project || 'Unavailable');
+    field('Requested path', item.requestedPath || 'Unavailable');
+    field('Returned path', item.returnedPath || 'Unavailable');
+    if (item.requestedUrl) field('Requested page URL', item.requestedUrl);
+    if (kind === 'repository') field('Requested version', item.requestedVersion ? (item.versionType || 'Type unspecified') + ': ' + item.requestedVersion : 'Server default (not resolved)');
+    field('Returned revision', item.returnedRevision || 'Unavailable');
+    field('Explicit source range', item.range ? item.range.startLine + '-' + item.range.endLine : 'Not supplied');
+    field('Lines in returned text', item.responseLines === undefined ? 'Unavailable' : String(item.responseLines));
+    if (kind === 'wiki') field('Returned sections', item.sections.length ? item.sections.map(section => section.title + (section.startLine ? ' (lines ' + section.startLine + '-' + section.endLine + ')' : '')).join('\\n')
+      + '\\nSource: ' + item.sectionSource : 'Not supplied');
+    field('Server / tool', item.server + '\\n' + item.toolId);
+    field('Request time', item.at ? new Date(item.at).toLocaleString() : 'Unavailable');
+    entry.append(metadata);
+    if (item.previewAvailable) {
+      const button = document.createElement('button'); button.textContent = 'Show returned text'; button.className = 'resource-show';
+      button.title = 'Display saved response text locally; may contain sensitive content.';
+      const preview = document.createElement('pre'); preview.className = 'resource-preview'; preview.hidden = true; preview.tabIndex = 0;
+      const note = document.createElement('div'); note.className = 'resource-summary';
+      button.addEventListener('click', () => {
+        if (!preview.hidden) { preview.hidden = true; preview.textContent = ''; note.textContent = ''; button.textContent = 'Show returned text'; return; }
+        api.postMessage({ type: 'showResourceContent', sessionId: resourceState.sessionId, callId: item.callId, kind });
+      });
+      entry.append(button, note, preview);
+    } else if (item.previewUnavailable) { field('Preview', item.previewUnavailable); }
+    if (item.url || item.requestedUrl) {
+      const link = document.createElement('a'); link.href = item.url || item.requestedUrl; link.textContent = 'Open in Azure DevOps';
+      link.addEventListener('click', event => { event.preventDefault(); api.postMessage({ type: 'openResource', sessionId: resourceState.sessionId, callId: item.callId, kind }); });
+      entry.append(link);
+    }
+    fragment.append(entry);
+  }
+  list.replaceChildren(fragment); byId(kind + '-more').hidden = filtered.length <= resourceLimits[kind];
+}
+for (const kind of ['repository', 'wiki']) {
+  byId(kind + '-filter').addEventListener('input', () => { resourceLimits[kind] = 50; renderResources(kind); });
+  byId(kind + '-more').addEventListener('click', () => { resourceLimits[kind] += 50; renderResources(kind); });
+}
 let state;
 let currentLine = 1;
 let keyboardLine;
@@ -336,6 +416,22 @@ canvas.addEventListener('keydown', event => {
 });
 window.addEventListener('message', event => {
   const message = event.data;
+  if (message.type === 'resources') {
+    const signature = JSON.stringify(message); if (signature === resourceSignature) return;
+    if (message.sessionId !== resourceState.sessionId) for (const kind of ['repository', 'wiki']) {
+      byId(kind + '-filter').value = ''; byId(kind + '-list').replaceChildren(); resourceLimits[kind] = 50;
+    }
+    resourceState = message; resourceSignature = signature;
+    renderResources('repository'); renderResources('wiki'); return;
+  }
+  if (message.type === 'resourceContent' && message.sessionId === resourceState.sessionId && ['repository', 'wiki'].includes(message.kind)) {
+    const entry = [...byId(message.kind + '-list').children].find(element => element.dataset.key === message.callId);
+    if (!entry || !entry.querySelector('.resource-preview')) return;
+    const preview = entry.querySelector('.resource-preview'); preview.textContent = message.text; preview.hidden = false;
+    entry.querySelector('.resource-show').textContent = 'Hide returned text';
+    entry.querySelector('.resource-summary').textContent = message.truncated ? 'Preview truncated at the local preview limit. Response completeness is not guaranteed.' : 'Saved response text; completeness is not guaranteed.';
+    return;
+  }
   if (message.type === 'workItems') {
     const signature = JSON.stringify(message);
     if (signature === workSignature) return;

@@ -27,6 +27,22 @@ function workItemCalls() {
     return [get, comments, missing, failed, get];
 }
 
+function resourceCalls() {
+    const tool = { kind: 'toolInvocationSerialized', source: { type: 'mcp', serverLabel: 'Azure DevOps' }, isComplete: true, isConfirmed: { type: 1 } };
+    const repo = { ...tool, toolId: 'mcp_azuredevops_m_repo_file', toolCallId: 'repo-content',
+        toolSpecificData: { rawInput: { action: 'get_content', project: 'Sample Project', repositoryId: 'Sample Repo', path: '/src/checkout.ts', version: 'main', versionType: 'Branch' } },
+        resultDetails: { output: [{ isText: true, value: JSON.stringify({ path: '/src/checkout.ts', commitId: 'c0ffee123', startLine: 11, endLine: 12,
+            content: 'export const sample = "SAMPLE_SOURCE_ONLY";\n// <img src=x onerror=alert(1)>',
+            webUrl: 'https://dev.azure.com/example/Sample%20Project/_git/SampleRepo?path=%2Fsrc%2Fcheckout.ts&token=PRIVATE_TOKEN' }) }] } };
+    const wiki = { ...tool, toolId: 'mcp_azuredevops_2_wiki', toolCallId: 'wiki-content',
+        toolSpecificData: { rawInput: { action: 'get_page', project: 'Sample Project', wikiIdentifier: 'Sample Wiki', path: '/Getting-started' } },
+        resultDetails: { output: [{ isText: true, value: JSON.stringify({ path: '/Getting-started', content: '# Getting started\n\n## Prerequisites\nSAMPLE_WIKI_ONLY\n\n## Run locally\nUse the development profile.',
+            remoteUrl: 'https://dev.azure.com/example/Sample%20Project/_wiki/wikis/SampleWiki/42/Getting-started' }) }] } };
+    const missing = { ...repo, toolCallId: 'repo-missing', resultDetails: {} };
+    const metadata = { ...wiki, toolCallId: 'wiki-metadata', resultDetails: { output: [{ isText: true, value: JSON.stringify({ path: '/Getting-started', id: 42 }) }] } };
+    return [repo, wiki, missing, metadata, repo];
+}
+
 export async function run(): Promise<void> {
     const extension = vscode.extensions.getExtension<Runtime>('davidle-ms.agent-context-trace');
     assert.ok(extension, 'Development extension is installed');
@@ -108,12 +124,12 @@ export async function run(): Promise<void> {
             const timeout = setTimeout(() => { listener.dispose(); reject(new Error('MCP history watcher did not refresh')); }, 10000);
             const listener = runtime.view.onDidChange(() => {
                 const selected = runtime.view.selected();
-                if (selected?.coverage === 'copilot-history-read-metadata' && selected.workItems?.length === 4) {
+                if (selected?.coverage === 'copilot-history-read-metadata' && selected.workItems?.length === 4 && selected.resources?.length === 4) {
                     clearTimeout(timeout); listener.dispose(); resolve();
                 }
             });
         });
-        const mcpAppend = JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: workItemCalls() }) + '\n';
+        const mcpAppend = JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: [...workItemCalls(), ...resourceCalls()] }) + '\n';
         await fs.appendFile(file, mcpAppend);
         await workItemUpdate;
         assert.equal(runtime.view.selected()?.events.length, 2, 'MCP history never creates file coverage');
@@ -259,7 +275,7 @@ export async function run(): Promise<void> {
         await heatmap.locator('#work-items').evaluate(element => { element.scrollTop = 0; });
         assert.equal(await heatmap.locator('#work-items').evaluate(element => element.scrollWidth <= element.clientWidth), true, 'Work-item metadata fits a narrow sidebar');
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'azure-devops-work-items.png') });
-        await section.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'azure-devops-work-items-panel.png') });
+        await section.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'azure-devops-work-items-overview.png') });
         await workRead.locator('summary').click();
         await heatmap.locator('#work-items').evaluate(element => { element.scrollTop = 0; });
         await section.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'azure-devops-work-item-details.png') });
@@ -290,6 +306,63 @@ export async function run(): Promise<void> {
         runtime.view.showHistory({ ...workSession, id: 'copilot:empty-workitems', workItems: [] });
         await heatmap.locator('#work-empty').filter({ hasText: 'No supported Azure DevOps' }).waitFor();
         assert.equal(await heatmap.locator('.work-entry').count(), 0, 'Session switching clears external metadata');
+        const resourceSession = extractHistory({ sessionId: 'ado-resources', customTitle: 'Synthetic repository and wiki preview',
+            requests: [{ timestamp: '2026-09-17T02:00:00Z', response: resourceCalls() }] }, roots);
+        runtime.view.showHistory(resourceSession);
+        await heatmap.getByRole('tab', { name: /^Repository Files/ }).click();
+        await heatmap.locator('#repository-summary').filter({ hasText: '2 recorded calls' }).waitFor();
+        const repositoryEntry = heatmap.locator('#repository-list .work-entry').first();
+        await repositoryEntry.locator('summary').click();
+        const detailValue = (label: string) => repositoryEntry.locator('dt').filter({ hasText: new RegExp(`^${label}$`) }).locator('+ dd').textContent();
+        assert.equal(await detailValue('Requested repository'), 'Sample Repo');
+        assert.equal(await detailValue('Requested version'), 'Branch: main');
+        assert.equal(await detailValue('Returned revision'), 'c0ffee123');
+        assert.equal(await detailValue('Explicit source range'), '11-12');
+        assert.equal((await heatmap.locator('#repository-panel').textContent())?.includes('SAMPLE_SOURCE_ONLY'), false, 'Source is not sent before preview request');
+        assert.equal((await repositoryEntry.locator('a').getAttribute('href'))?.includes('PRIVATE_TOKEN'), false);
+        await repositoryEntry.getByRole('button', { name: 'Show returned text', exact: true }).click();
+        await repositoryEntry.locator('pre').filter({ hasText: 'SAMPLE_SOURCE_ONLY' }).waitFor();
+        assert.equal(await repositoryEntry.locator('img').count(), 0, 'Returned content is text, never executed HTML');
+        await repositoryEntry.getByRole('button', { name: 'Hide returned text', exact: true }).click();
+        assert.equal(await repositoryEntry.locator('pre').textContent(), '', 'Hidden preview content is cleared');
+        await heatmap.locator('#repository-panel').evaluate(element => { element.scrollTop = 0; });
+        await section.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'azure-devops-repository-files.png') });
+        await heatmap.locator('#repository-filter').fill('does-not-exist');
+        await heatmap.locator('#repository-empty').filter({ hasText: 'No matching resources' }).waitFor();
+        await heatmap.locator('#repository-filter').fill('checkout');
+        assert.equal(await heatmap.locator('#repository-list .work-entry').count(), 2);
+        await heatmap.getByRole('tab', { name: /^Wiki Pages/ }).click();
+        await heatmap.locator('#wiki-summary').filter({ hasText: '2 recorded calls' }).waitFor();
+        const wikiEntry = heatmap.locator('#wiki-list .work-entry').first();
+        await wikiEntry.locator('summary').click();
+        assert.match(await wikiEntry.locator('summary').textContent() ?? '', /Getting started/);
+        assert.match(await wikiEntry.locator('dt').filter({ hasText: /^Returned sections$/ }).locator('+ dd').textContent() ?? '', /Prerequisites[\s\S]*Run locally/);
+        assert.equal(await wikiEntry.locator('dt').filter({ hasText: /^Explicit source range$/ }).locator('+ dd').textContent(), 'Not supplied');
+        const metadataEntry = heatmap.locator('#wiki-list .work-entry').nth(1);
+        assert.equal(await metadataEntry.getByRole('button', { name: 'Show returned text' }).count(), 0);
+        await wikiEntry.getByRole('button', { name: 'Show returned text', exact: true }).click();
+        await wikiEntry.locator('pre').filter({ hasText: 'SAMPLE_WIKI_ONLY' }).waitFor();
+        await wikiEntry.getByRole('button', { name: 'Hide returned text', exact: true }).click();
+        await heatmap.locator('#wiki-panel').evaluate(element => { element.scrollTop = 0; });
+        assert.equal(await heatmap.locator('#wiki-panel').evaluate(element => element.scrollWidth <= element.clientWidth), true);
+        await section.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'azure-devops-wiki-pages.png') });
+        await heatmap.locator('#wiki-filter').fill('Prerequisites');
+        assert.equal(await heatmap.locator('#wiki-list .work-entry').count(), 1, 'Wiki heading search uses returned sections');
+        await runtime.view.toggle();
+        assert.equal(await heatmap.locator('#wiki-list .work-entry').count(), 1, 'Eye toggle does not hide external reads');
+        await runtime.view.toggle();
+        runtime.view.showHistory({ ...resourceSession, id: 'copilot:empty-resources', resources: [] });
+        await heatmap.locator('#wiki-empty').filter({ hasText: 'No supported calls' }).waitFor();
+        assert.equal(await heatmap.locator('#wiki-list').textContent(), '');
+        assert.equal(await heatmap.locator('#repository-list').textContent(), '');
+        assert.equal(await heatmap.locator('#wiki-filter').inputValue(), '');
+        assert.equal(runtime.view.provideFileDecoration(sourceUri), undefined, 'Remote content never marks a local file');
+        await heatmap.locator('#wiki-tab').focus();
+        await heatmap.locator('#wiki-tab').press('ArrowLeft');
+        assert.equal(await heatmap.locator('#repository-tab').getAttribute('aria-selected'), 'true');
+        await heatmap.locator('#repository-tab').press('Home');
+        assert.equal(await heatmap.locator('#file-tab').getAttribute('aria-selected'), 'true');
+        console.log('PASS: repository/wiki tabs, revision provenance, on-demand plain-text previews, Markdown headings, keyboard tabs, filtering, and session isolation');
         await runtime.view.selectSession(sessionId);
         await heatmap.getByRole('tab', { name: 'File Heatmap', exact: true }).click();
         await canvas.waitFor({ state: 'visible' });
