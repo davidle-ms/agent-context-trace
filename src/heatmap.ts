@@ -265,6 +265,12 @@ function renderResources(kind) {
     status.textContent = item.operation + ' | ' + (item.outcome !== 'returned' ? outcomes[item.outcome] :
       item.evidence === 'content' ? 'Content returned' : item.evidence === 'text-response' ? 'Text response; content identity unverified' : 'Metadata returned; no content');
     summary.append(status); entry.append(summary);
+    if (kind === 'repository' && item.outcome === 'returned') {
+      const readLink = document.createElement('a'); readLink.href = '#read-lines'; readLink.textContent = 'View read lines';
+      readLink.className = 'resource-read-lines';
+      readLink.addEventListener('click', event => { event.preventDefault(); api.postMessage({ type: 'viewReadLines', sessionId: resourceState.sessionId, callId: item.callId, kind }); });
+      entry.append(readLink);
+    }
     const metadata = document.createElement('dl');
     const field = (name, value) => { const term = document.createElement('dt'); term.textContent = name;
       const detail = document.createElement('dd'); detail.textContent = value; metadata.append(term, detail); };

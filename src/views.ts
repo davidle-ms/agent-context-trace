@@ -5,6 +5,7 @@ import { HistoryRead, HistorySession, historyStatus, HistoryEntry, groupHistory 
 import { heatmapHtml } from './heatmap';
 import { workItemLink } from './work-items';
 import { resourceLink, resourceMetadata } from './resource-history';
+import { repositoryReadLinesHtml } from './read-lines';
 
 const frequencyColors = {
     single: { background: 'readSectionBackground', border: 'readSectionBorder', filename: 'readFileForeground' },
@@ -41,6 +42,8 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
     readonly onDidChange = this.changed.event;
     readonly onDidChangeFileDecorations = this.decorated.event;
     private webview: vscode.WebviewView | undefined;
+    private readLinesPanel: vscode.WebviewPanel | undefined;
+    private readLinesSessionId: string | undefined;
     private heatmapEditor: vscode.TextEditor | undefined;
     private heatmapToken = 0;
     statusMessage = '';
@@ -137,6 +140,7 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
 
     refresh(): void {
         const session = this.selected();
+        if (session?.id !== this.readLinesSessionId) { this.readLinesPanel?.dispose(); }
         if (session?.id !== this.highlightSessionId) {
             this.highlightSessionId = session?.id;
             this.editedHistoryDocuments = new WeakSet();
@@ -220,10 +224,23 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
                 const link = activity?.itemId ? workItemLink(activity.url, activity.itemId) : undefined;
                 if (link) { void vscode.env.openExternal(vscode.Uri.parse(link)); }
             }
-            else if ((value.type === 'openResource' || value.type === 'showResourceContent') && value.sessionId === this.history?.id) {
+            else if ((value.type === 'openResource' || value.type === 'showResourceContent' || value.type === 'viewReadLines') && value.sessionId === this.history?.id) {
                 const activity = this.history?.resources?.find(item => item.callId === value.callId && item.kind === value.kind);
                 if (!activity) { return; }
-                if (value.type === 'openResource') {
+                if (value.type === 'viewReadLines') {
+                    if (activity.kind !== 'repository' || activity.outcome !== 'returned') { return; }
+                    if (!this.readLinesPanel) {
+                        const panel = vscode.window.createWebviewPanel('agentContextTrace.repositoryReadLines', 'Repository Read Lines',
+                            vscode.ViewColumn.Beside, { enableScripts: false, localResourceRoots: [] });
+                        this.readLinesPanel = panel;
+                        panel.onDidDispose(() => {
+                            if (this.readLinesPanel === panel) { this.readLinesPanel = undefined; this.readLinesSessionId = undefined; }
+                        });
+                    }
+                    this.readLinesSessionId = this.history!.id;
+                    this.readLinesPanel.webview.html = repositoryReadLinesHtml(activity, this.history!.label);
+                    this.readLinesPanel.reveal(vscode.ViewColumn.Beside);
+                } else if (value.type === 'openResource') {
                     const link = resourceLink(activity.url ?? activity.requestedUrl, activity.kind);
                     if (link) { void vscode.env.openExternal(vscode.Uri.parse(link)); }
                 } else if (activity.preview !== undefined) {
@@ -343,5 +360,5 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
         await vscode.window.showTextDocument(document, { selection: new vscode.Range(selected.event.startLine - 1, 0,
             selected.event.endLine - 1, document.lineAt(selected.event.endLine - 1).text.length) });
     }
-    dispose(): void { for (const disposable of this.disposables) { disposable.dispose(); } }
+    dispose(): void { this.readLinesPanel?.dispose(); for (const disposable of this.disposables) { disposable.dispose(); } }
 }

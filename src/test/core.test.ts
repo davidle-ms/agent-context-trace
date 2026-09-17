@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { extractHistory, replayHistory, readHistory, listHistory, historyStatus, groupHistory, HistoryEntry } from '../history';
 import { extractWorkItemActivity, workItemLink, redactWorkItemActivity } from '../work-items';
 import { extractResourceActivity, resourceLink, resourceMetadata, redactResourceActivity } from '../resource-history';
+import { repositoryReadLines, repositoryReadLinesHtml } from '../read-lines';
 
 const input = { sessionId: randomUUID(), filePath: '/workspace/source.ts', startLine: 1, endLine: 3 };
 const event = (startLine = 1, endLine = 10): ReadEvent => ({ id: randomUUID(), rootId: hash('root'), relativePath: 'source.ts',
@@ -123,6 +124,35 @@ test('repository and wiki reads distinguish requests, content evidence, ranges, 
     assert.equal(resourceLink('javascript:alert(1)', 'repository'), undefined);
     assert.equal(resourceLink('https://user:secret@dev.azure.com/org/project/_git/repo', 'repository'), undefined);
     assert.equal(resourceLink('https://dev.azure.com.evil.example/org/_git/repo', 'repository'), undefined);
+});
+
+test('repository read-line view uses explicit matching ranges, escapes source, and labels unknown mapping', () => {
+    const activity = extractResourceActivity({ requests: [{ response: [{ kind: 'toolInvocationSerialized', toolId: 'mcp_azuredevops_m_repo_file',
+        toolCallId: 'read-lines', source: { type: 'mcp' }, isComplete: true, isConfirmed: { type: 1 },
+        toolSpecificData: { rawInput: { action: 'get_content', path: '/sample.ts' } },
+        resultDetails: { output: [{ isText: true, value: JSON.stringify({ path: '/sample.ts', startLine: 11, endLine: 12,
+            content: '<img src=x onerror=alert(1)>\r\nsecond', commitId: 'abc123' }) }] }
+    }] }] })[0]!;
+    const model = repositoryReadLines(activity);
+    assert.equal(model.mapped, true);
+    assert.deepEqual(model.lines.map(line => line.number), [11, 12]);
+    const html = repositoryReadLinesHtml(activity, '<script>session</script>');
+    assert.equal(html.includes('<img'), false);
+    assert.equal(html.includes('<script>'), false);
+    assert.ok(html.includes('&lt;img'));
+    assert.ok(html.includes('recorded'));
+    for (const partial of [{ range: undefined }, { responseLines: 3 }, { evidence: 'text-response' as const }]) {
+        const unknown = repositoryReadLines({ ...activity, ...partial });
+        assert.equal(unknown.mapped, false);
+        assert.deepEqual(unknown.lines.map(line => line.number), [1, 2]);
+        assert.match(unknown.note, /not source-file line numbers/);
+    }
+    const truncated = repositoryReadLines({ ...activity, preview: 'partial', previewTruncated: true });
+    assert.deepEqual(truncated.lines.map(line => line.number), [11]);
+    assert.match(truncated.note, /final displayed line may be partial/);
+    const unavailable = repositoryReadLines({ ...activity, preview: undefined, previewUnavailable: 'Withheld' });
+    assert.deepEqual(unavailable.lines, []);
+    assert.match(unavailable.note, /Withheld/);
 });
 
 test('chat JSONL reconstructs snapshots, replacements, appends, and partial final writes', () => {

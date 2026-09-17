@@ -212,7 +212,9 @@ export async function run(): Promise<void> {
         assert.ok(page, 'Native VS Code workbench renderer is reachable');
         const section = page.locator('.pane').filter({ has: page.getByText('Agent Read Coverage', { exact: true }) }).first();
         await section.waitFor({ state: 'visible' });
-        const heatmap = page.frameLocator('iframe.webview').frameLocator('#active-frame');
+        const coverageFrameName = await page.locator('iframe.webview').getAttribute('name');
+        assert.ok(coverageFrameName);
+        const heatmap = page.frameLocator(`iframe[name="${coverageFrameName}"]`).frameLocator('#active-frame');
         const canvas = heatmap.locator('#heatmap');
         await canvas.waitFor({ state: 'visible' });
         assert.match(await heatmap.locator('#filename').textContent() ?? '', /repo-one.*source.ts/);
@@ -318,8 +320,41 @@ export async function run(): Promise<void> {
         assert.equal(await detailValue('Requested version'), 'Branch: main');
         assert.equal(await detailValue('Returned revision'), 'c0ffee123');
         assert.equal(await detailValue('Explicit source range'), '11-12');
+        assert.equal(await heatmap.locator('#repository-list .work-entry').nth(1).getByRole('link', { name: 'View read lines' }).count(), 0,
+            'Unavailable responses do not offer a read-lines link');
+        const sourceBeforeReadView = document.getText();
+        await repositoryEntry.getByRole('link', { name: 'View read lines', exact: true }).click();
+        const readPanel = page.frameLocator(`iframe.webview:not([name="${coverageFrameName}"])`).frameLocator('#active-frame');
+        await readPanel.getByRole('heading', { name: 'Recorded Source Lines' }).waitFor();
+        assert.deepEqual(await readPanel.locator('.line-number').allTextContents(), ['11', '12']);
+        assert.equal(await readPanel.locator('.read-line.recorded').count(), 2);
+        assert.match(await readPanel.locator('code').first().textContent() ?? '', /SAMPLE_SOURCE_ONLY/);
+        assert.equal(await readPanel.locator('img, script, input, textarea, [contenteditable="true"]').count(), 0,
+            'Read-lines window displays source as escaped, read-only text with no executable scripts');
+        const readLineColor = await readPanel.locator('.recorded').first().evaluate(element =>
+            getComputedStyle(element).backgroundColor.match(/[\d.]+/g)!.map(Number));
+        assert.deepEqual(readLineColor.slice(0, 3), [232, 179, 90]);
+        assert.ok(Math.abs(readLineColor[3]! - 24 / 255) < 0.01, 'Returned lines use the existing amber highlight opacity');
+        assert.match(await readPanel.locator('#evidence').textContent() ?? '', /not the current repository file/);
+        assert.equal(document.getText(), sourceBeforeReadView, 'Opening repository read lines does not alter the local file');
+        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'repository-read-lines-window.png') });
+        const unknownRangeSession = structuredClone(resourceSession);
+        unknownRangeSession.resources![0]!.range = undefined;
+        runtime.view.showHistory(unknownRangeSession);
+        await repositoryEntry.getByRole('link', { name: 'View read lines', exact: true }).click();
+        await readPanel.getByRole('heading', { name: 'Saved Response Lines' }).waitFor();
+        assert.deepEqual(await readPanel.locator('.line-number').allTextContents(), ['1', '2']);
+        assert.equal(await readPanel.locator('.read-line.recorded').count(), 0);
+        assert.match(await readPanel.locator('#evidence').textContent() ?? '', /not source-file line numbers/);
+        assert.equal(await page.locator('iframe.webview').count(), 2, 'Read-lines requests reuse one panel');
+        runtime.view.showHistory({ ...resourceSession, id: 'copilot:resource-panel-cleared' });
+        await page.locator(`iframe.webview:not([name="${coverageFrameName}"])`).waitFor({ state: 'detached' });
+        runtime.view.showHistory(resourceSession);
+        await heatmap.locator('#repository-summary').filter({ hasText: '2 recorded calls' }).waitFor();
+        await repositoryEntry.locator('summary').click();
+        console.log('PASS: repository read-lines link opens an escaped read-only window, accurate amber line numbering, unknown-range labels, panel reuse, and session cleanup');
         assert.equal((await heatmap.locator('#repository-panel').textContent())?.includes('SAMPLE_SOURCE_ONLY'), false, 'Source is not sent before preview request');
-        assert.equal((await repositoryEntry.locator('a').getAttribute('href'))?.includes('PRIVATE_TOKEN'), false);
+        assert.equal((await repositoryEntry.getByRole('link', { name: 'Open in Azure DevOps', exact: true }).getAttribute('href'))?.includes('PRIVATE_TOKEN'), false);
         await repositoryEntry.getByRole('button', { name: 'Show returned text', exact: true }).click();
         await repositoryEntry.locator('pre').filter({ hasText: 'SAMPLE_SOURCE_ONLY' }).waitFor();
         assert.equal(await repositoryEntry.locator('img').count(), 0, 'Returned content is text, never executed HTML');
