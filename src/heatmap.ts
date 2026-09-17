@@ -101,6 +101,10 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 #work-filter { width: 100%; padding: 5px 6px; margin: 8px 0; border: 1px solid var(--cp-border); background: var(--cp-surface); color: var(--cp-text); font: inherit; border-radius: 2px; }
 .work-entry { padding: 10px 0; border-top: 1px solid var(--cp-border); overflow-wrap: anywhere; }
 .work-entry summary { cursor: pointer; font-size: 12px; }
+.wiki-title { margin: 0; font-size: 13px; line-height: 18px; }
+.wiki-context { margin: 4px 0; font-size: 11px; color: var(--cp-text-muted); }
+.wiki-technical { margin-top: 10px; }
+.wiki-technical > summary { color: var(--cp-text-muted); }
 .work-outcome { display: block; color: var(--cp-text-muted); font-size: 11px; margin: 4px 0; }
 .work-entry dl { font-size: 11px; margin: 8px 0; }
 .work-entry dt { color: var(--cp-text-muted); margin-top: 8px; }
@@ -270,16 +274,23 @@ function renderResources(kind) {
   const opened = new Set([...list.querySelectorAll('details[open]')].map(element => element.dataset.key));
   const fragment = document.createDocumentFragment();
   for (const item of filtered.slice(0, resourceLimits[kind])) {
-    const entry = document.createElement('details'); entry.className = 'work-entry'; entry.dataset.key = item.callId; entry.open = opened.has(item.callId);
-    const summary = document.createElement('summary'); summary.textContent = kind === 'search' ? item.query || 'Query unavailable'
+    const entry = document.createElement(kind === 'wiki' ? 'article' : 'details'); entry.className = 'work-entry'; entry.dataset.key = item.callId;
+    if (kind !== 'wiki') entry.open = opened.has(item.callId);
+    const summary = document.createElement(kind === 'wiki' ? 'h3' : 'summary'); summary.textContent = kind === 'search' ? item.query || 'Query unavailable'
       : kind === 'logs' ? 'Build ' + (item.buildId ?? 'unknown') + ' / Log ' + (item.logId ?? 'unknown')
-        : kind === 'wiki' ? item.title || item.returnedPath || item.requestedPath || 'Page unavailable'
+        : kind === 'wiki' ? item.title || (item.returnedPath || item.requestedPath || '').split('/').filter(Boolean).at(-1) || 'Page unavailable'
           : item.returnedPath || item.requestedPath || 'File path unavailable';
     const status = document.createElement('span'); status.className = 'work-outcome';
     status.textContent = item.operation + ' | ' + (item.outcome !== 'returned' ? outcomes[item.outcome] :
       item.evidence === 'search-matches' ? 'Search matches / snippets only' : item.evidence === 'log-content' ? 'Log text returned; portion may be incomplete'
         : item.evidence === 'content' ? 'Content returned' : item.evidence === 'text-response' ? 'Text response; content identity unverified' : 'Metadata returned; no content');
-    summary.append(status); entry.append(summary);
+    if (kind === 'wiki') {
+      summary.className = 'wiki-title';
+      const identity = document.createElement('p'); identity.className = 'wiki-context';
+      identity.textContent = [item.resource || item.project, item.returnedPath || item.requestedPath].filter(Boolean).join(' | ');
+      status.textContent = item.outcome === 'unavailable' ? 'Response details unavailable' : status.textContent.slice(item.operation.length + 3);
+      entry.append(summary, identity, status);
+    } else { summary.append(status); entry.append(summary); }
     if (kind === 'repository' && item.outcome === 'returned') {
       const readLink = document.createElement('a'); readLink.href = '#read-lines'; readLink.textContent = 'View read lines';
       readLink.className = 'resource-read-lines';
@@ -287,7 +298,9 @@ function renderResources(kind) {
       entry.append(readLink);
     }
     const metadata = document.createElement('dl');
-    const field = (name, value) => { const term = document.createElement('dt'); term.textContent = name;
+    const field = (name, value) => {
+      if (kind === 'wiki' && (!value || value === 'Unavailable' || value === 'Not supplied')) return;
+      const term = document.createElement('dt'); term.textContent = name;
       const detail = document.createElement('dd'); detail.textContent = value; metadata.append(term, detail); };
     if (kind === 'search') {
       field('Query', item.query || 'Unavailable');
@@ -318,11 +331,20 @@ function renderResources(kind) {
       field('Explicit source range', item.range ? item.range.startLine + '-' + item.range.endLine : 'Not supplied');
       field('Lines in returned text', item.responseLines === undefined ? 'Unavailable' : String(item.responseLines));
     }
-    if (kind === 'wiki') field('Returned sections', item.sections.length ? item.sections.map(section => section.title + (section.startLine ? ' (lines ' + section.startLine + '-' + section.endLine + ')' : '')).join('\\n')
-      + '\\nSource: ' + item.sectionSource : 'Not supplied');
+    if (kind === 'wiki') {
+      field('Operation', item.operation);
+      if (item.sections.length) {
+        const sections = document.createElement('dl'); sections.className = 'wiki-sections';
+        const label = document.createElement('dt'); label.textContent = 'Returned sections';
+        const values = document.createElement('dd');
+        values.textContent = item.sections.map(section => section.title + (section.startLine ? ' (lines ' + section.startLine + '-' + section.endLine + ')' : '')).join('\\n');
+        sections.append(label, values); entry.append(sections);
+        field('Section source', item.sectionSource);
+      }
+    }
     field('Server / tool', item.server + '\\n' + item.toolId);
     field('Request time', item.at ? new Date(item.at).toLocaleString() : 'Unavailable');
-    entry.append(metadata);
+    if (kind !== 'wiki') entry.append(metadata);
     if (kind === 'search') {
       for (const match of item.matches || []) {
         const matchView = document.createElement('details'); matchView.className = 'search-match';
@@ -351,6 +373,12 @@ function renderResources(kind) {
       const link = document.createElement('a'); link.href = item.url || item.requestedUrl; link.textContent = 'Open in Azure DevOps';
       link.addEventListener('click', event => { event.preventDefault(); api.postMessage({ type: 'openResource', sessionId: resourceState.sessionId, callId: item.callId, kind }); });
       entry.append(link);
+    }
+    if (kind === 'wiki') {
+      const technical = document.createElement('details'); technical.className = 'wiki-technical'; technical.dataset.key = item.callId + ':technical';
+      technical.open = opened.has(technical.dataset.key);
+      const label = document.createElement('summary'); label.textContent = 'Technical details';
+      technical.append(label, metadata); entry.append(technical);
     }
     fragment.append(entry);
   }

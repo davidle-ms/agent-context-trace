@@ -400,10 +400,15 @@ export async function run(): Promise<void> {
         await heatmap.getByRole('tab', { name: /^Wiki Pages/ }).click();
         await heatmap.locator('#wiki-summary').filter({ hasText: '2 recorded calls' }).waitFor();
         const wikiEntry = heatmap.locator('#wiki-list .work-entry').first();
-        await wikiEntry.locator('summary').click();
-        assert.match(await wikiEntry.locator('summary').textContent() ?? '', /Getting started/);
+        await wikiEntry.getByRole('heading', { name: 'Getting started', exact: true }).waitFor();
+        assert.match(await wikiEntry.locator('.wiki-context').textContent() ?? '', /Sample Wiki.*Getting-started/);
+        assert.equal(await wikiEntry.locator('.wiki-technical').getAttribute('open'), null);
+        assert.equal(await wikiEntry.getByText('Server / tool', { exact: true }).isVisible(), false, 'Diagnostic fields are collapsed initially');
         assert.match(await wikiEntry.locator('dt').filter({ hasText: /^Returned sections$/ }).locator('+ dd').textContent() ?? '', /Prerequisites[\s\S]*Run locally/);
-        assert.equal(await wikiEntry.locator('dt').filter({ hasText: /^Explicit source range$/ }).locator('+ dd').textContent(), 'Not supplied');
+        assert.equal(await wikiEntry.getByText('Explicit source range', { exact: true }).count(), 0, 'Unavailable fields are omitted');
+        await wikiEntry.getByText('Technical details', { exact: true }).click();
+        await wikiEntry.getByText('Server / tool', { exact: true }).waitFor();
+        await wikiEntry.getByText('Technical details', { exact: true }).click();
         const metadataEntry = heatmap.locator('#wiki-list .work-entry').nth(1);
         assert.equal(await metadataEntry.getByRole('button', { name: 'Show returned text' }).count(), 0);
         await wikiEntry.getByRole('button', { name: 'Show returned text', exact: true }).click();
@@ -411,12 +416,31 @@ export async function run(): Promise<void> {
         await wikiEntry.getByRole('button', { name: 'Hide returned text', exact: true }).click();
         await heatmap.locator('#wiki-panel').evaluate(element => { element.scrollTop = 0; });
         assert.equal(await heatmap.locator('#wiki-panel').evaluate(element => element.scrollWidth <= element.clientWidth), true);
-        await section.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'azure-devops-wiki-pages.png') });
+        await section.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'azure-devops-wiki-compact.png') });
         await heatmap.locator('#wiki-filter').fill('Prerequisites');
         assert.equal(await heatmap.locator('#wiki-list .work-entry').count(), 1, 'Wiki heading search uses returned sections');
         await runtime.view.toggle();
         assert.equal(await heatmap.locator('#wiki-list .work-entry').count(), 1, 'Eye toggle does not hide external reads');
         await runtime.view.toggle();
+        const missingWikiSession = extractHistory({ sessionId: 'wiki-missing-compact', customTitle: 'Synthetic wiki overview', requests: [{
+            timestamp: '2026-09-17T01:33:07Z', response: [{ kind: 'toolInvocationSerialized', toolId: 'mcp_azuredevops_3_wiki', toolCallId: 'missing-wiki',
+                source: { type: 'mcp', serverLabel: 'AzureDevOps.Mcp' }, isComplete: true, isConfirmed: { type: 1 },
+                toolSpecificData: { rawInput: { action: 'get_page', project: 'Engineering', wikiIdentifier: 'Engineering.wiki', path: '/Engineering/Architecture' } } }]
+        }] }, roots);
+        runtime.view.showHistory(missingWikiSession);
+        await wikiEntry.getByRole('heading', { name: 'Architecture', exact: true }).waitFor();
+        await wikiEntry.getByText('Response details unavailable', { exact: true }).waitFor();
+        assert.equal(await wikiEntry.locator('.wiki-context').textContent(), 'Engineering.wiki | /Engineering/Architecture');
+        assert.equal(await wikiEntry.locator('dd').filter({ hasText: /^(Unavailable|Not supplied)$/ }).count(), 0);
+        assert.equal(await wikiEntry.getByText('Returned sections', { exact: true }).count(), 0);
+        assert.equal(await wikiEntry.locator('.resource-show').count(), 0);
+        assert.equal(await wikiEntry.getByText('Request time', { exact: true }).isVisible(), false);
+        await section.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'azure-devops-wiki-unavailable-compact.png') });
+        await wikiEntry.getByText('Technical details', { exact: true }).focus();
+        await wikiEntry.getByText('Technical details', { exact: true }).press('Enter');
+        await wikiEntry.getByText('Request time', { exact: true }).waitFor();
+        runtime.view.refresh();
+        assert.equal(await wikiEntry.locator('.wiki-technical').getAttribute('open'), '', 'Refreshing keeps technical details expanded');
         runtime.view.showHistory({ ...resourceSession, id: 'copilot:empty-resources', resources: [] });
         await heatmap.locator('#wiki-empty').filter({ hasText: 'No supported calls' }).waitFor();
         assert.equal(await heatmap.locator('#wiki-list').textContent(), '');
