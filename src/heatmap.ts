@@ -244,7 +244,13 @@ canvas.addEventListener('keydown', event => {
 window.addEventListener('message', event => {
   const message = event.data;
   if (message.type === 'viewport' && state?.token === message.token) { state.visible = message.visible; drawViewport(); return; }
-  if (message.type === 'hover' && state?.token === message.token) { showLine(message.line); return; }
+  if (message.type === 'hover' && state?.token === message.token) {
+    if (showLine(message.line)) {
+      byId('pointer').hidden = false;
+      byId('pointer').style.top = ((currentLine - 0.5) / state.lineCount * 100) + '%';
+    }
+    return;
+  }
   if (message.type !== 'state') return;
   state = message;
   keyboardLine = undefined;

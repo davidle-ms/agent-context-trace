@@ -343,8 +343,6 @@ export async function run(): Promise<void> {
             await verifyHoverMarker(fraction);
             await heatmap.locator('#position').filter({ hasText: `Line ${Math.floor(fraction * document.lineCount) + 1} / ${document.lineCount}` }).waitFor();
         }
-        await vscode.commands.executeCommand('vscode.executeHoverProvider', sourceUri, new vscode.Position(0, 0));
-        await verifyHoverMarker(0.96);
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'file-heatmap-hover-marker.png') });
         await canvas.evaluate(element => {
             element.addEventListener('pointerleave', () => {
@@ -419,16 +417,16 @@ export async function run(): Promise<void> {
         for (const [line, count] of [[180, 4], [181, 8], [182, 8]] as const) {
             await page.locator('.monaco-editor .view-lines .view-line').getByText(`value${line}`, { exact: true }).first().hover();
             await heatmap.locator('#position').filter({ hasText: `Line ${line} / 240 | ${count} recorded reads` }).waitFor();
+            await verifyHoverMarker((line - 0.5) / 240);
             assert.ok(longEditor.selection.isEqual(selectionBefore), 'Editor hover updates the counter without moving the cursor');
             assert.deepEqual(longEditor.visibleRanges.map(range => [range.start.line, range.end.line]), beforeEditorHover,
                 'Editor hover does not navigate or scroll the source');
             await page.keyboard.press('Escape');
         }
         await heatmap.locator('#position').hover();
-        await heatmap.locator('#pointer').waitFor({ state: 'hidden' });
         await vscode.commands.executeCommand('vscode.executeHoverProvider', heatmapUri, new vscode.Position(179, 0));
         await heatmap.locator('#position').filter({ hasText: 'Line 180 / 240' }).waitFor();
-        assert.equal(await heatmap.locator('#pointer').isVisible(), false, 'Editor hover updates the counter without placing a mouse marker');
+        await verifyHoverMarker(179.5 / 240);
         await vscode.commands.executeCommand('vscode.executeHoverProvider', otherUri, new vscode.Position(0, 0));
         assert.match(await heatmap.locator('#position').textContent() ?? '', /Line 180 \/ 240/,
             'Hover requests for another file cannot overwrite the active-file counter');
@@ -436,11 +434,13 @@ export async function run(): Promise<void> {
         assert.equal(runtime.view.selected()?.events.length, 8, 'Editor hover does not record reads');
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'file-heatmap-editor-hover.png') });
         console.log('PASS: live line counter from source-editor hover, unchanged selection and viewport, no synthetic reads, and active-file isolation');
+        const markerBeforeKeyboard = await heatmap.locator('#pointer').evaluate(element => (element as HTMLElement).style.top);
         await canvas.focus();
         const topRevealed = waitForLine(1);
         await canvas.press('Home');
         await topRevealed;
-        assert.equal(await heatmap.locator('#pointer').isVisible(), false, 'Keyboard navigation cannot create a mouse marker');
+        assert.equal(await heatmap.locator('#pointer').evaluate(element => (element as HTMLElement).style.top), markerBeforeKeyboard,
+            'Keyboard navigation does not reposition the last mouse-hover marker');
         await canvas.press('Enter');
         await page.waitForFunction(() => !!globalThis.document.querySelector('.monaco-editor.focused'));
         assert.equal(longEditor.selection.active.line, 0, 'Keyboard commit focuses the mapped editor line');
