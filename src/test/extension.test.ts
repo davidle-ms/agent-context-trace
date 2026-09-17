@@ -343,6 +343,8 @@ export async function run(): Promise<void> {
             await verifyHoverMarker(fraction);
             await heatmap.locator('#position').filter({ hasText: `Line ${Math.floor(fraction * document.lineCount) + 1} / ${document.lineCount}` }).waitFor();
         }
+        await vscode.commands.executeCommand('vscode.executeHoverProvider', sourceUri, new vscode.Position(0, 0));
+        await verifyHoverMarker(0.96);
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'file-heatmap-hover-marker.png') });
         await canvas.evaluate(element => {
             element.addEventListener('pointerleave', () => {
@@ -422,8 +424,13 @@ export async function run(): Promise<void> {
                 'Editor hover does not navigate or scroll the source');
             await page.keyboard.press('Escape');
         }
+        await heatmap.locator('#position').hover();
+        await heatmap.locator('#pointer').waitFor({ state: 'hidden' });
+        await vscode.commands.executeCommand('vscode.executeHoverProvider', heatmapUri, new vscode.Position(179, 0));
+        await heatmap.locator('#position').filter({ hasText: 'Line 180 / 240' }).waitFor();
+        assert.equal(await heatmap.locator('#pointer').isVisible(), false, 'Editor hover updates the counter without placing a mouse marker');
         await vscode.commands.executeCommand('vscode.executeHoverProvider', otherUri, new vscode.Position(0, 0));
-        assert.match(await heatmap.locator('#position').textContent() ?? '', /Line 182 \/ 240/,
+        assert.match(await heatmap.locator('#position').textContent() ?? '', /Line 180 \/ 240/,
             'Hover requests for another file cannot overwrite the active-file counter');
         assert.equal(longDocument.getText(), heatmapSource);
         assert.equal(runtime.view.selected()?.events.length, 8, 'Editor hover does not record reads');
@@ -433,9 +440,16 @@ export async function run(): Promise<void> {
         const topRevealed = waitForLine(1);
         await canvas.press('Home');
         await topRevealed;
+        assert.equal(await heatmap.locator('#pointer').isVisible(), false, 'Keyboard navigation cannot create a mouse marker');
         await canvas.press('Enter');
         await page.waitForFunction(() => !!globalThis.document.querySelector('.monaco-editor.focused'));
         assert.equal(longEditor.selection.active.line, 0, 'Keyboard commit focuses the mapped editor line');
+        const committedSelection = longEditor.selection;
+        const hoverBounds = await canvas.boundingBox();
+        assert.ok(hoverBounds);
+        await canvas.hover({ position: { x: hoverBounds.width / 2, y: 0.625 * hoverBounds.height } });
+        await verifyHoverMarker(0.625);
+        assert.ok(longEditor.selection.isEqual(committedSelection), 'Mouse marker follows hover independently of the committed cursor position');
         await runtime.view.toggle();
         await heatmap.locator('#empty').filter({ hasText: 'Read colors off' }).waitFor();
         assert.equal(await canvas.isVisible(), false, 'Eye toggle also hides the heatmap');

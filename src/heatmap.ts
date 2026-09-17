@@ -196,11 +196,9 @@ function drawViewport() {
     byId('viewport').style.height = ((visible.endLine - visible.startLine + 1) / state.lineCount * 100) + '%';
   }
 }
-function showLine(line, fraction) {
+function showLine(line) {
   if (!state?.navigable || !Number.isInteger(line)) return false;
   currentLine = Math.max(1, Math.min(state.lineCount, line));
-  byId('pointer').hidden = false;
-  byId('pointer').style.top = ((fraction ?? (currentLine - 0.5) / state.lineCount) * 100) + '%';
   const matches = state.ranges.filter(range => range.startLine <= currentLine && range.endLine >= currentLine);
   const count = matches.reduce((total, range) => total + range.readCount, 0);
   const provenance = matches.some(range => !range.verified) ? 'Historical range; file may have changed.' : matches.length ? 'Source revision matches.' : 'No displayed read range.';
@@ -210,8 +208,8 @@ function showLine(line, fraction) {
   canvas.setAttribute('aria-valuetext', label + '. ' + provenance);
   return true;
 }
-function point(line, focus = false, fraction) {
-  if (!showLine(line, fraction)) return;
+function point(line, focus = false) {
+  if (!showLine(line)) return;
   pending = { type: 'navigate', token: state.token, line: currentLine, focus };
   if (focus) { clearTimeout(timer); timer = undefined; }
   if (!timer) timer = setTimeout(() => { timer = undefined; if (pending) api.postMessage(pending); pending = undefined; }, focus ? 0 : 30);
@@ -222,7 +220,11 @@ function pointAt(event, focus = false) {
   const bounds = canvas.getBoundingClientRect();
   if (!bounds.height) return;
   const fraction = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
-  point(Math.floor(fraction * state.lineCount) + 1, focus, fraction);
+  if (!focus) {
+    byId('pointer').hidden = false;
+    byId('pointer').style.top = (fraction * 100) + '%';
+  }
+  point(Math.floor(fraction * state.lineCount) + 1, focus);
 }
 canvas.addEventListener('pointerenter', event => pointAt(event));
 canvas.addEventListener('pointermove', event => pointAt(event));
