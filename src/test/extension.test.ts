@@ -43,6 +43,27 @@ function resourceCalls() {
     return [repo, wiki, missing, metadata, repo];
 }
 
+function searchLogCalls() {
+    const tool = { kind: 'toolInvocationSerialized', source: { type: 'mcp', serverLabel: 'Azure DevOps' }, isComplete: true, isConfirmed: { type: 1 } };
+    const search = { ...tool, toolId: 'mcp_azuredevops_3_search_code', toolCallId: 'code-search', toolSpecificData: { rawInput: {
+        searchText: 'Sample: checkout', project: ['Sample Project'], repository: ['Sample Repo'], path: ['/src'], branch: ['main'], skip: 0, top: 5 } },
+        resultDetails: { output: [{ isText: true, value: JSON.stringify({ count: 50, infoCode: 0, results: [
+            { path: '/src/checkout.ts', repository: { name: 'Sample Repo' }, project: { name: 'Sample Project' },
+                matches: { content: [{ line: 12, charOffset: 40, length: 8 }] }, versions: [{ branchName: 'main', changeId: 'sample-sha' }] },
+            { path: '/src/cart.ts', repository: { name: 'Sample Repo' }, snippet: 'SAMPLE_SNIPPET_ONLY <img src=x onerror=alert(1)>', matches: { content: [{ line: 8 }] } }
+        ] }) }] } };
+    const empty = { ...search, toolCallId: 'empty-search', resultDetails: { output: [{ isText: true, value: '{"count":0,"results":[]}' }] } };
+    const log = { ...tool, toolId: 'mcp_azuredevops_m_pipelines_build_log', toolCallId: 'build-log', toolSpecificData: { rawInput: {
+        action: 'get_content', project: 'Sample Project', buildId: 2048, logId: 17, startLine: 101, endLine: 220 } },
+        resultDetails: { output: [{ isText: true, value: JSON.stringify(['SAMPLE_LOG_ONLY: build started', '<script>not executable</script>']) }] } };
+    const bounded = { ...log, toolCallId: 'bounded-log', resultDetails: { output: [{ isText: true, value: JSON.stringify({ buildId: 2048,
+        logId: 17, startLine: 101, endLine: 102, lines: ['SAMPLE_LOG_ONLY: compile', 'SAMPLE_LOG_ONLY: complete'],
+        webUrl: 'https://dev.azure.com/example/Sample%20Project/_build/results?buildId=2048&token=PRIVATE_TOKEN' }) }] } };
+    const failed = { ...log, toolCallId: 'failed-log', resultDetails: { isError: true } };
+    const list = { ...log, toolCallId: 'list-logs', toolSpecificData: { rawInput: { action: 'list', project: 'Sample Project', buildId: 2048 } } };
+    return [search, empty, log, bounded, failed, list, search];
+}
+
 export async function run(): Promise<void> {
     const extension = vscode.extensions.getExtension<Runtime>('davidle-ms.agent-context-trace');
     assert.ok(extension, 'Development extension is installed');
@@ -124,12 +145,12 @@ export async function run(): Promise<void> {
             const timeout = setTimeout(() => { listener.dispose(); reject(new Error('MCP history watcher did not refresh')); }, 10000);
             const listener = runtime.view.onDidChange(() => {
                 const selected = runtime.view.selected();
-                if (selected?.coverage === 'copilot-history-read-metadata' && selected.workItems?.length === 4 && selected.resources?.length === 4) {
+                if (selected?.coverage === 'copilot-history-read-metadata' && selected.workItems?.length === 4 && selected.resources?.length === 9) {
                     clearTimeout(timeout); listener.dispose(); resolve();
                 }
             });
         });
-        const mcpAppend = JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: [...workItemCalls(), ...resourceCalls()] }) + '\n';
+        const mcpAppend = JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: [...workItemCalls(), ...resourceCalls(), ...searchLogCalls()] }) + '\n';
         await fs.appendFile(file, mcpAppend);
         await workItemUpdate;
         assert.equal(runtime.view.selected()?.events.length, 2, 'MCP history never creates file coverage');
@@ -408,6 +429,85 @@ export async function run(): Promise<void> {
         await heatmap.locator('#repository-tab').press('Home');
         assert.equal(await heatmap.locator('#file-tab').getAttribute('aria-selected'), 'true');
         console.log('PASS: repository/wiki tabs, revision provenance, on-demand plain-text previews, Markdown headings, keyboard tabs, filtering, and session isolation');
+        const searchLogs = extractHistory({ sessionId: 'search-log-preview', customTitle: 'Synthetic code search and pipeline log preview',
+            requests: [{ timestamp: '2026-09-17T10:00:00Z', response: searchLogCalls() }] }, roots);
+        runtime.view.showHistory(searchLogs);
+        await heatmap.getByRole('tab', { name: /^Code Searches/ }).click();
+        await heatmap.locator('#search-summary').filter({ hasText: '2 recorded calls' }).waitFor();
+        const searchEntry = heatmap.locator('#search-list > .work-entry').first();
+        await searchEntry.locator(':scope > summary').click();
+        const searchValue = (name: string) => searchEntry.locator('dt').filter({ hasText: new RegExp(`^${name}$`) }).locator('+ dd').textContent();
+        assert.equal(await searchValue('Repository scope'), 'Sample Repo');
+        assert.equal(await searchValue('Path scope'), '/src');
+        assert.equal(await searchValue('Returned matches \\(this response\\)'), '2');
+        assert.equal(await searchValue('Server-reported count'), '50');
+        assert.match(await searchValue('Evidence') ?? '', /not full-file reads/);
+        assert.equal(await searchEntry.locator('.search-match').count(), 2);
+        await searchEntry.locator('.search-match').first().locator('summary').click();
+        await searchEntry.getByText(/Match lines: 12/).waitFor();
+        assert.equal((await heatmap.locator('#search-panel').textContent())?.includes('SAMPLE_SNIPPET_ONLY'), false);
+        await searchEntry.getByRole('button', { name: 'Show saved snippets', exact: true }).click();
+        await searchEntry.locator('pre').filter({ hasText: 'SAMPLE_SNIPPET_ONLY' }).waitFor();
+        assert.equal(await searchEntry.locator('img, script').count(), 0, 'Snippet markup is rendered as text only');
+        assert.match(await searchEntry.locator('.search-match').first().textContent() ?? '', /Match lines: 12/);
+        await searchEntry.getByRole('button', { name: 'Hide saved snippets', exact: true }).click();
+        assert.equal(await searchEntry.locator('pre').textContent(), '');
+        const emptySearch = heatmap.locator('#search-list > .work-entry').nth(1);
+        await emptySearch.locator(':scope > summary').click();
+        assert.equal(await emptySearch.locator('dt').filter({ hasText: /^Returned matches/ }).locator('+ dd').textContent(), '0');
+        assert.equal(await emptySearch.locator('.resource-show').count(), 0);
+        await emptySearch.locator(':scope > summary').click();
+        await heatmap.locator('#search-panel').evaluate(element => { element.scrollTop = 0; });
+        await section.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'azure-devops-code-searches.png') });
+        await heatmap.locator('#search-filter').fill('cart.ts');
+        assert.equal(await heatmap.locator('#search-list > .work-entry').count(), 1);
+        await heatmap.locator('#search-filter').fill('not found');
+        await heatmap.locator('#search-empty').filter({ hasText: 'No matching resources' }).waitFor();
+        await heatmap.getByRole('tab', { name: /^Pipeline Logs/ }).click();
+        await heatmap.locator('#logs-summary').filter({ hasText: '3 recorded calls' }).waitFor();
+        const logEntry = heatmap.locator('#logs-list > .work-entry').first();
+        await logEntry.locator(':scope > summary').click();
+        const logValue = (name: string) => logEntry.locator('dt').filter({ hasText: new RegExp(`^${name}$`) }).locator('+ dd').textContent();
+        assert.equal(await logValue('Build ID'), '2048'); assert.equal(await logValue('Log ID'), '17');
+        assert.match(await logValue('Requested log lines') ?? '', /101.*220/);
+        assert.match(await logValue('Returned log range') ?? '', /Not supplied/);
+        assert.equal(await logValue('Lines in returned text'), '2');
+        assert.equal((await heatmap.locator('#logs-panel').textContent())?.includes('SAMPLE_LOG_ONLY'), false);
+        await logEntry.getByRole('button', { name: 'Show returned log text', exact: true }).click();
+        await logEntry.locator('pre').filter({ hasText: 'SAMPLE_LOG_ONLY' }).waitFor();
+        assert.equal(await logEntry.locator('script').count(), 0);
+        await logEntry.getByRole('button', { name: 'Hide returned log text', exact: true }).click();
+        assert.equal(await logEntry.locator('pre').textContent(), '');
+        const returnedLog = heatmap.locator('#logs-list > .work-entry').nth(1);
+        await returnedLog.locator(':scope > summary').click();
+        assert.equal(await returnedLog.locator('dt').filter({ hasText: /^Returned log range$/ }).locator('+ dd').textContent(), '101-102');
+        assert.equal(await returnedLog.locator('a').getAttribute('href'), 'https://dev.azure.com/example/Sample%20Project/_build/results?buildId=2048');
+        assert.equal(await heatmap.locator('#logs-list > .work-entry').nth(2).locator('.resource-show').count(), 0);
+        await returnedLog.locator(':scope > summary').click();
+        await heatmap.locator('#logs-panel').evaluate(element => { element.scrollTop = 0; });
+        assert.equal(await heatmap.locator('#logs-panel').evaluate(element => element.scrollWidth <= element.clientWidth), true);
+        await section.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'azure-devops-pipeline-logs.png') });
+        await heatmap.locator('#logs-filter').fill('2048');
+        assert.equal(await heatmap.locator('#logs-list > .work-entry').count(), 3);
+        const manyLogs = { ...searchLogs, id: 'copilot:many-logs', resources: Array.from({ length: 51 }, (_, index) => ({
+            ...searchLogs.resources!.find(item => item.kind === 'logs')!, callId: `log-page-${index}` })) };
+        runtime.view.showHistory(manyLogs);
+        await heatmap.locator('#logs-summary').filter({ hasText: '51 recorded calls' }).waitFor();
+        assert.equal(await heatmap.locator('#logs-list > .work-entry').count(), 50);
+        await heatmap.locator('#logs-more').click();
+        assert.equal(await heatmap.locator('#logs-list > .work-entry').count(), 51);
+        runtime.view.showHistory({ ...searchLogs, id: 'copilot:empty-search-logs', resources: [] });
+        await heatmap.locator('#logs-empty').filter({ hasText: 'No supported calls' }).waitFor();
+        assert.equal(await heatmap.locator('#search-list').textContent(), '');
+        assert.equal(await heatmap.locator('#logs-list').textContent(), '');
+        assert.equal(await heatmap.locator('#search-filter').inputValue(), '');
+        assert.equal(await heatmap.locator('#logs-filter').inputValue(), '');
+        assert.equal(runtime.view.provideFileDecoration(sourceUri), undefined);
+        await heatmap.locator('#logs-tab').focus(); await heatmap.locator('#logs-tab').press('ArrowLeft');
+        assert.equal(await heatmap.locator('#search-tab').getAttribute('aria-selected'), 'true');
+        await heatmap.locator('#search-tab').press('Home');
+        assert.equal(await heatmap.locator('#file-tab').getAttribute('aria-selected'), 'true');
+        console.log('PASS: code-search scopes/matches/snippets, zero results, pipeline-log IDs/portions, opt-in escaped previews, filtering, pagination, keyboard tabs, and session isolation');
         await runtime.view.selectSession(sessionId);
         await heatmap.getByRole('tab', { name: 'File Heatmap', exact: true }).click();
         await canvas.waitFor({ state: 'visible' });
@@ -546,10 +646,21 @@ export async function run(): Promise<void> {
             assert.ok(marker.height >= 1.5 && marker.outline !== 'none', 'Hover marker has a contrasting outlined stroke');
             assert.equal(marker.pointerEvents, 'none', 'Marker cannot intercept mouse movement');
         };
-        for (const fraction of [0.04, 0.16, 0.37, 0.78, 0.96]) {
+        const hoverHeatmap = async (fraction: number) => {
+            await canvas.evaluate((element, target) => {
+                const content = globalThis.document.getElementById('content')!;
+                const bounds = element.getBoundingClientRect(), viewport = content.getBoundingClientRect();
+                content.scrollTop += bounds.top + target * bounds.height - viewport.top - viewport.height / 2;
+            }, fraction);
             const bounds = await canvas.boundingBox();
             assert.ok(bounds);
-            await canvas.hover({ position: { x: bounds.width / 2, y: fraction * bounds.height } });
+            const contentBounds = await heatmap.locator('#content').boundingBox();
+            assert.ok(contentBounds && bounds.y + fraction * bounds.height >= contentBounds.y
+                && bounds.y + fraction * bounds.height < contentBounds.y + contentBounds.height, 'Target point is visible in the scrolled map');
+            await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + fraction * bounds.height);
+        };
+        for (const fraction of [0.04, 0.16, 0.37, 0.78, 0.96]) {
+            await hoverHeatmap(fraction);
             await verifyHoverMarker(fraction);
             await heatmap.locator('#position').filter({ hasText: `Line ${Math.floor(fraction * document.lineCount) + 1} / ${document.lineCount}` }).waitFor();
         }
@@ -610,10 +721,8 @@ export async function run(): Promise<void> {
             });
         });
         for (const [line, count] of [[240, 8], [1, 1], [61, 2], [121, 4], [181, 8]] as const) {
-            const bounds = await canvas.boundingBox();
-            assert.ok(bounds);
             const revealed = waitForLine(line);
-            await canvas.hover({ position: { x: bounds.width / 2, y: (line - 0.5) / 240 * bounds.height } });
+            await hoverHeatmap((line - 0.5) / 240);
             await heatmap.locator('#position').filter({ hasText: `Line ${line} / 240 | ${count} recorded reads` }).waitFor();
             await revealed;
             await verifyHoverMarker((line - 0.5) / 240);
@@ -655,9 +764,7 @@ export async function run(): Promise<void> {
         await page.waitForFunction(() => !!globalThis.document.querySelector('.monaco-editor.focused'));
         assert.equal(longEditor.selection.active.line, 0, 'Keyboard commit focuses the mapped editor line');
         const committedSelection = longEditor.selection;
-        const hoverBounds = await canvas.boundingBox();
-        assert.ok(hoverBounds);
-        await canvas.hover({ position: { x: hoverBounds.width / 2, y: 0.625 * hoverBounds.height } });
+        await hoverHeatmap(0.625);
         await verifyHoverMarker(0.625);
         assert.ok(longEditor.selection.isEqual(committedSelection), 'Mouse marker follows hover independently of the committed cursor position');
         await runtime.view.toggle();

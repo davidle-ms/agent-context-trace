@@ -103,7 +103,7 @@ export function historyStatus(session: HistorySession): string {
     if (session.workItems?.length) {
         return 'No supported local file reads saved. Azure DevOps activity is available in Work Items.';
     }
-    if (session.resources?.length) { return 'No supported local file reads saved. Azure DevOps activity is available in Repository Files and Wiki Pages.'; }
+    if (session.resources?.length) { return 'No supported local file reads saved. See the Azure DevOps activity tabs for external context.'; }
     return 'Local Copilot history: no completed supported file reads saved yet. Continue the chat or select another session; colors update when history is saved.';
 }
 

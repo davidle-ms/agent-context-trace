@@ -142,7 +142,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
   #position { height: 32px; }
 }
 </style></head><body>
-<div id="tabs" role="tablist" aria-label="Recorded context"><button id="file-tab" role="tab" aria-selected="true" aria-controls="content">File Heatmap</button><button id="work-tab" role="tab" aria-selected="false" aria-controls="work-items" tabindex="-1">Work Items</button><button id="repository-tab" role="tab" aria-selected="false" aria-controls="repository-panel" tabindex="-1">Repository Files</button><button id="wiki-tab" role="tab" aria-selected="false" aria-controls="wiki-panel" tabindex="-1">Wiki Pages</button></div>
+<div id="tabs" role="tablist" aria-label="Recorded context"><button id="file-tab" role="tab" aria-selected="true" aria-controls="content">File Heatmap</button><button id="work-tab" role="tab" aria-selected="false" aria-controls="work-items" tabindex="-1">Work Items</button><button id="repository-tab" role="tab" aria-selected="false" aria-controls="repository-panel" tabindex="-1">Repository Files</button><button id="wiki-tab" role="tab" aria-selected="false" aria-controls="wiki-panel" tabindex="-1">Wiki Pages</button><button id="search-tab" role="tab" aria-selected="false" aria-controls="search-panel" tabindex="-1">Code Searches</button><button id="logs-tab" role="tab" aria-selected="false" aria-controls="logs-panel" tabindex="-1">Pipeline Logs</button></div>
 <div id="content" role="tabpanel" aria-labelledby="file-tab">
 <div id="status"></div><h2 id="filename">No file open</h2>
 <div id="scale" aria-label="Recorded reads"><span class="single"><i></i>1</span><span class="repeat"><i></i>2-3</span><span class="frequent"><i></i>4-7</span><span class="intense"><i></i>8+</span></div>
@@ -166,6 +166,14 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 <h2>Azure DevOps / Wiki Pages</h2><div id="wiki-summary" class="resource-summary"></div>
 <input id="wiki-filter" class="resource-filter" type="search" aria-label="Filter wiki activity" placeholder="Filter wiki, page or section">
 <div id="wiki-empty" class="resource-empty"></div><div id="wiki-list"></div><button id="wiki-more" hidden>Show more</button></section>
+<section id="search-panel" class="resource-panel" role="tabpanel" aria-labelledby="search-tab" hidden>
+<h2>Azure DevOps / Code Searches</h2><div id="search-summary" class="resource-summary"></div>
+<input id="search-filter" class="resource-filter" type="search" aria-label="Filter code searches" placeholder="Filter query, scope or matched path">
+<div id="search-empty" class="resource-empty"></div><div id="search-list"></div><button id="search-more" hidden>Show more</button></section>
+<section id="logs-panel" class="resource-panel" role="tabpanel" aria-labelledby="logs-tab" hidden>
+<h2>Azure DevOps / Pipeline Logs</h2><div id="logs-summary" class="resource-summary"></div>
+<input id="logs-filter" class="resource-filter" type="search" aria-label="Filter pipeline logs" placeholder="Filter build ID, log ID or project">
+<div id="logs-empty" class="resource-empty"></div><div id="logs-list"></div><button id="logs-more" hidden>Show more</button></section>
 <script nonce="${nonce}">
 const api = acquireVsCodeApi();
 const byId = id => document.getElementById(id);
@@ -174,7 +182,7 @@ const context = canvas.getContext('2d');
 let workState = { entries: [], empty: 'No session selected' };
 let workLimit = 50;
 let workSignature = '';
-const tabs = [['file-tab', 'content'], ['work-tab', 'work-items'], ['repository-tab', 'repository-panel'], ['wiki-tab', 'wiki-panel']];
+const tabs = [['file-tab', 'content'], ['work-tab', 'work-items'], ['repository-tab', 'repository-panel'], ['wiki-tab', 'wiki-panel'], ['search-tab', 'search-panel'], ['logs-tab', 'logs-panel']];
 function chooseTab(tabId) {
   byId('position').hidden = tabId !== 'file-tab';
   for (const [id, panel] of tabs) {
@@ -244,26 +252,33 @@ byId('work-filter').addEventListener('input', () => { workLimit = 50; renderWork
 byId('work-more').addEventListener('click', () => { workLimit += 50; renderWorkItems(); });
 let resourceState = { entries: [], empty: 'No session selected' };
 let resourceSignature = '';
-const resourceLimits = { repository: 50, wiki: 50 };
+const resourceNames = { repository: 'Repository Files', wiki: 'Wiki Pages', search: 'Code Searches', logs: 'Pipeline Logs' };
+const resourceKinds = Object.keys(resourceNames);
+const resourceLimits = { repository: 50, wiki: 50, search: 50, logs: 50 };
 function renderResources(kind) {
   const entries = resourceState.entries.filter(item => item.kind === kind);
-  const names = kind === 'repository' ? 'Repository Files' : 'Wiki Pages';
+  const names = resourceNames[kind];
   byId(kind + '-tab').textContent = names + (entries.length ? ' (' + entries.length + ')' : '');
   byId(kind + '-summary').textContent = entries.length + ' recorded calls | saved history (best effort)';
   const query = byId(kind + '-filter').value.trim().toLowerCase();
   const filtered = entries.filter(item => [item.resource, item.title, item.project, item.requestedPath, item.returnedPath,
-    item.requestedVersion, item.returnedRevision, ...item.sections.map(section => section.title)].join(' ').toLowerCase().includes(query));
+    item.requestedVersion, item.returnedRevision, item.query, item.buildId, item.logId, ...Object.values(item.scope || {}).flat(),
+    ...(item.matches || []).flatMap(match => [match.path, match.repository, match.project, match.branch]),
+    ...item.sections.map(section => section.title)].join(' ').toLowerCase().includes(query));
   byId(kind + '-empty').textContent = !entries.length ? resourceState.empty : !filtered.length ? 'No matching resources' : '';
   const list = byId(kind + '-list');
   const opened = new Set([...list.querySelectorAll('details[open]')].map(element => element.dataset.key));
   const fragment = document.createDocumentFragment();
   for (const item of filtered.slice(0, resourceLimits[kind])) {
     const entry = document.createElement('details'); entry.className = 'work-entry'; entry.dataset.key = item.callId; entry.open = opened.has(item.callId);
-    const summary = document.createElement('summary'); summary.textContent = kind === 'wiki' ? item.title || item.returnedPath || item.requestedPath || 'Page unavailable'
-      : item.returnedPath || item.requestedPath || 'File path unavailable';
+    const summary = document.createElement('summary'); summary.textContent = kind === 'search' ? item.query || 'Query unavailable'
+      : kind === 'logs' ? 'Build ' + (item.buildId ?? 'unknown') + ' / Log ' + (item.logId ?? 'unknown')
+        : kind === 'wiki' ? item.title || item.returnedPath || item.requestedPath || 'Page unavailable'
+          : item.returnedPath || item.requestedPath || 'File path unavailable';
     const status = document.createElement('span'); status.className = 'work-outcome';
     status.textContent = item.operation + ' | ' + (item.outcome !== 'returned' ? outcomes[item.outcome] :
-      item.evidence === 'content' ? 'Content returned' : item.evidence === 'text-response' ? 'Text response; content identity unverified' : 'Metadata returned; no content');
+      item.evidence === 'search-matches' ? 'Search matches / snippets only' : item.evidence === 'log-content' ? 'Log text returned; portion may be incomplete'
+        : item.evidence === 'content' ? 'Content returned' : item.evidence === 'text-response' ? 'Text response; content identity unverified' : 'Metadata returned; no content');
     summary.append(status); entry.append(summary);
     if (kind === 'repository' && item.outcome === 'returned') {
       const readLink = document.createElement('a'); readLink.href = '#read-lines'; readLink.textContent = 'View read lines';
@@ -274,27 +289,60 @@ function renderResources(kind) {
     const metadata = document.createElement('dl');
     const field = (name, value) => { const term = document.createElement('dt'); term.textContent = name;
       const detail = document.createElement('dd'); detail.textContent = value; metadata.append(term, detail); };
-    field(kind === 'wiki' ? 'Requested wiki' : 'Requested repository', item.resource || 'Unavailable');
-    field('Project', item.project || 'Unavailable');
-    field('Requested path', item.requestedPath || 'Unavailable');
-    field('Returned path', item.returnedPath || 'Unavailable');
-    if (item.requestedUrl) field('Requested page URL', item.requestedUrl);
-    if (kind === 'repository') field('Requested version', item.requestedVersion ? (item.versionType || 'Type unspecified') + ': ' + item.requestedVersion : 'Server default (not resolved)');
-    field('Returned revision', item.returnedRevision || 'Unavailable');
-    field('Explicit source range', item.range ? item.range.startLine + '-' + item.range.endLine : 'Not supplied');
-    field('Lines in returned text', item.responseLines === undefined ? 'Unavailable' : String(item.responseLines));
+    if (kind === 'search') {
+      field('Query', item.query || 'Unavailable');
+      for (const [key, label] of [['projects', 'Project scope'], ['repositories', 'Repository scope'], ['paths', 'Path scope'], ['branches', 'Branch scope']]) {
+        field(label, item.scope?.[key]?.length ? item.scope[key].join('\\n') : 'Not specified');
+      }
+      field('Requested result page', 'Skip: ' + (item.skip ?? 'not specified') + ' | Top: ' + (item.top ?? 'not specified'));
+      field('Returned matches (this response)', item.returnedMatches === undefined ? 'Unavailable' : String(item.returnedMatches));
+      field('Server-reported count', item.reportedMatches === undefined ? 'Unavailable' : String(item.reportedMatches));
+      if (item.searchInfoCode !== undefined) field('Search info code', String(item.searchInfoCode));
+      field('Evidence', 'Search matches and snippets only; these are not full-file reads.');
+      if (item.matchesTruncated) field('Match metadata', 'Limited or incomplete; not all returned locations are shown.');
+    } else if (kind === 'logs') {
+      field('Build ID', item.buildId === undefined ? 'Unavailable' : String(item.buildId));
+      field('Log ID', item.logId === undefined ? 'Unavailable' : String(item.logId));
+      field('Project', item.project || 'Unavailable');
+      field('Requested log lines', 'Start: ' + (item.requestedLogRange?.startLine ?? 'not supplied') + ' | End: ' + (item.requestedLogRange?.endLine ?? 'not supplied'));
+      field('Returned log range', item.range ? item.range.startLine + '-' + item.range.endLine : 'Not supplied; requested range is not proof of returned coverage');
+      field('Lines in returned text', item.responseLines === undefined ? 'Unavailable' : String(item.responseLines));
+    } else {
+      field(kind === 'wiki' ? 'Requested wiki' : 'Requested repository', item.resource || 'Unavailable');
+      field('Project', item.project || 'Unavailable');
+      field('Requested path', item.requestedPath || 'Unavailable');
+      field('Returned path', item.returnedPath || 'Unavailable');
+      if (item.requestedUrl) field('Requested page URL', item.requestedUrl);
+      if (kind === 'repository') field('Requested version', item.requestedVersion ? (item.versionType || 'Type unspecified') + ': ' + item.requestedVersion : 'Server default (not resolved)');
+      field('Returned revision', item.returnedRevision || 'Unavailable');
+      field('Explicit source range', item.range ? item.range.startLine + '-' + item.range.endLine : 'Not supplied');
+      field('Lines in returned text', item.responseLines === undefined ? 'Unavailable' : String(item.responseLines));
+    }
     if (kind === 'wiki') field('Returned sections', item.sections.length ? item.sections.map(section => section.title + (section.startLine ? ' (lines ' + section.startLine + '-' + section.endLine + ')' : '')).join('\\n')
       + '\\nSource: ' + item.sectionSource : 'Not supplied');
     field('Server / tool', item.server + '\\n' + item.toolId);
     field('Request time', item.at ? new Date(item.at).toLocaleString() : 'Unavailable');
     entry.append(metadata);
+    if (kind === 'search') {
+      for (const match of item.matches || []) {
+        const matchView = document.createElement('details'); matchView.className = 'search-match';
+        const heading = document.createElement('summary'); heading.textContent = (match.repository || 'Repository unavailable') + ' / ' + (match.path || 'Path unavailable');
+        const description = document.createElement('p'); description.className = 'resource-summary';
+        description.textContent = 'Snippet evidence only\\nProject: ' + (match.project || 'Unavailable') + '\\nBranch: ' + (match.branch || 'Unavailable')
+          + '\\nRevision: ' + (match.revision || 'Unavailable') + '\\nMatch lines: ' + (match.lines.length ? match.lines.join(', ') : 'Not supplied')
+          + '\\nSnippet text: ' + (match.snippetsAvailable ? 'Available on request' : 'Not saved or withheld');
+        description.style.whiteSpace = 'pre-line';
+        matchView.append(heading, description); entry.append(matchView);
+      }
+    }
     if (item.previewAvailable) {
-      const button = document.createElement('button'); button.textContent = 'Show returned text'; button.className = 'resource-show';
+      const showLabel = kind === 'search' ? 'Show saved snippets' : kind === 'logs' ? 'Show returned log text' : 'Show returned text';
+      const button = document.createElement('button'); button.textContent = showLabel; button.className = 'resource-show';
       button.title = 'Display saved response text locally; may contain sensitive content.';
       const preview = document.createElement('pre'); preview.className = 'resource-preview'; preview.hidden = true; preview.tabIndex = 0;
-      const note = document.createElement('div'); note.className = 'resource-summary';
+      const note = document.createElement('div'); note.className = 'resource-summary resource-preview-note';
       button.addEventListener('click', () => {
-        if (!preview.hidden) { preview.hidden = true; preview.textContent = ''; note.textContent = ''; button.textContent = 'Show returned text'; return; }
+        if (!preview.hidden) { preview.hidden = true; preview.textContent = ''; note.textContent = ''; button.textContent = showLabel; return; }
         api.postMessage({ type: 'showResourceContent', sessionId: resourceState.sessionId, callId: item.callId, kind });
       });
       entry.append(button, note, preview);
@@ -308,7 +356,7 @@ function renderResources(kind) {
   }
   list.replaceChildren(fragment); byId(kind + '-more').hidden = filtered.length <= resourceLimits[kind];
 }
-for (const kind of ['repository', 'wiki']) {
+for (const kind of resourceKinds) {
   byId(kind + '-filter').addEventListener('input', () => { resourceLimits[kind] = 50; renderResources(kind); });
   byId(kind + '-more').addEventListener('click', () => { resourceLimits[kind] += 50; renderResources(kind); });
 }
@@ -424,18 +472,18 @@ window.addEventListener('message', event => {
   const message = event.data;
   if (message.type === 'resources') {
     const signature = JSON.stringify(message); if (signature === resourceSignature) return;
-    if (message.sessionId !== resourceState.sessionId) for (const kind of ['repository', 'wiki']) {
+    if (message.sessionId !== resourceState.sessionId) for (const kind of resourceKinds) {
       byId(kind + '-filter').value = ''; byId(kind + '-list').replaceChildren(); resourceLimits[kind] = 50;
     }
     resourceState = message; resourceSignature = signature;
-    renderResources('repository'); renderResources('wiki'); return;
+    for (const kind of resourceKinds) renderResources(kind); return;
   }
-  if (message.type === 'resourceContent' && message.sessionId === resourceState.sessionId && ['repository', 'wiki'].includes(message.kind)) {
+  if (message.type === 'resourceContent' && message.sessionId === resourceState.sessionId && resourceKinds.includes(message.kind)) {
     const entry = [...byId(message.kind + '-list').children].find(element => element.dataset.key === message.callId);
     if (!entry || !entry.querySelector('.resource-preview')) return;
     const preview = entry.querySelector('.resource-preview'); preview.textContent = message.text; preview.hidden = false;
-    entry.querySelector('.resource-show').textContent = 'Hide returned text';
-    entry.querySelector('.resource-summary').textContent = message.truncated ? 'Preview truncated at the local preview limit. Response completeness is not guaranteed.' : 'Saved response text; completeness is not guaranteed.';
+    entry.querySelector('.resource-show').textContent = message.kind === 'search' ? 'Hide saved snippets' : message.kind === 'logs' ? 'Hide returned log text' : 'Hide returned text';
+    entry.querySelector('.resource-preview-note').textContent = message.truncated ? 'Preview truncated at the local preview limit. Response completeness is not guaranteed.' : 'Saved response text; completeness is not guaranteed.';
     return;
   }
   if (message.type === 'workItems') {

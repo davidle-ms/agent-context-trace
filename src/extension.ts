@@ -180,7 +180,7 @@ export class Runtime {
     private async chooseCopilotSession(): Promise<void> {
         this.guard();
         if (!this.context.workspaceState.get('copilotHistoryConsent', false)) {
-            const approved = await vscode.window.showWarningMessage('Read local Copilot chat history? This version-dependent adapter reads chat files from this and the default VS Code profile. Derived file-read and Azure DevOps work-item, repository-file, and wiki metadata is displayed. Bounded file/wiki text previews are held in memory and shown only on request; work-item field values and comment bodies are not retained. Original chats are never modified or copied. It is not a supported Copilot API.',
+            const approved = await vscode.window.showWarningMessage('Read local Copilot chat history? This version-dependent adapter reads chat files from this and the default VS Code profile. Derived file-read and Azure DevOps work-item, repository-file, wiki, search, and pipeline-log metadata is displayed. Bounded file/wiki text, search snippet, and log previews are held in memory and shown only on request; work-item field values and comment bodies are not retained. Original chats are never modified or copied. It is not a supported Copilot API.',
                 { modal: true }, 'Read Local History');
             if (approved !== 'Read Local History') { return; }
             await this.context.workspaceState.update('copilotHistoryConsent', true);

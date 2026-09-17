@@ -126,6 +126,77 @@ test('repository and wiki reads distinguish requests, content evidence, ranges, 
     assert.equal(resourceLink('https://dev.azure.com.evil.example/org/_git/repo', 'repository'), undefined);
 });
 
+test('code searches retain query scope and returned match evidence without full-file coverage', () => {
+    const result = { count: 300, infoCode: 0, results: [{ path: '/src/example.ts', repository: { name: 'Repo' }, project: { name: 'Demo' },
+        versions: [{ branchName: 'main', changeId: 'commit-1' }], matches: { content: [{ line: 27, charOffset: 40, length: 5, column: 1 }] } },
+        { path: '/src/other.ts', snippet: 'PRIVATE_SNIPPET', matches: { content: [{ line: 8 }] } }] };
+    const tool = { kind: 'toolInvocationSerialized', toolId: 'mcp_azuredevops_3_search_code', toolCallId: 'search-code',
+        source: { type: 'mcp' }, isComplete: true, isConfirmed: { type: 1 }, toolSpecificData: { rawInput: { searchText: 'find me',
+            project: ['Demo'], repository: ['Repo'], path: ['/src'], branch: ['main'], skip: 5, top: 2 } },
+        resultDetails: { output: [{ isText: true, value: JSON.stringify(result) }] } };
+    const snapshot = { sessionId: 'searches', requests: [{ response: [tool, tool] }] };
+    const [entry] = extractResourceActivity(snapshot);
+    assert.equal(entry!.query, 'find me');
+    assert.deepEqual(entry!.scope, { projects: ['Demo'], repositories: ['Repo'], paths: ['/src'], branches: ['main'] });
+    assert.equal(entry!.skip, 5); assert.equal(entry!.top, 2);
+    assert.equal(entry!.returnedMatches, 2); assert.equal(entry!.reportedMatches, 300);
+    assert.equal(entry!.evidence, 'search-matches'); assert.equal(entry!.range, undefined);
+    assert.deepEqual(entry!.matches![0]!.lines, [27]); assert.equal(entry!.matches![0]!.snippetsAvailable, false);
+    assert.match(entry!.preview ?? '', /Search snippets only/);
+    assert.equal(JSON.stringify(resourceMetadata([entry!])).includes('PRIVATE_SNIPPET'), false);
+    const exported = { resources: [entry!] }; redactResourceActivity(exported, false);
+    assert.equal(JSON.stringify(exported).includes('PRIVATE_SNIPPET'), false);
+    redactResourceActivity(exported, true); assert.deepEqual(exported, {});
+    assert.deepEqual(extractHistory(snapshot, []).events, []);
+    const empty = extractResourceActivity({ requests: [{ response: [{ ...tool, resultDetails: { output: [{ isText: true, value: '{"count":0,"results":[]}' }] } }] }] })[0]!;
+    assert.equal(empty.outcome, 'returned'); assert.equal(empty.returnedMatches, 0); assert.equal(empty.preview, undefined);
+    const many = { ...result, results: Array.from({ length: 201 }, () => result.results[0]) };
+    const limited = extractResourceActivity({ requests: [{ response: [{ ...tool, resultDetails: { output: [{ isText: true, value: JSON.stringify(many) }] } }] }] })[0]!;
+    assert.equal(limited.matches?.length, 200); assert.equal(limited.matchesTruncated, true);
+    const secret = { ...result, results: [{ path: '/.env', snippet: 'SECRET_VALUE' }] };
+    const withheld = extractResourceActivity({ requests: [{ response: [{ ...tool, resultDetails: { output: [{ isText: true, value: JSON.stringify(secret) }] } }] }] })[0]!;
+    assert.equal(withheld.preview, undefined); assert.equal(withheld.matches?.[0]?.snippetsAvailable, false);
+    for (const extra of [{ isError: true }, { isComplete: false }, { isCancelled: true }, { resultDetails: {} }]) {
+        const missing = extractResourceActivity({ requests: [{ response: [{ ...tool, ...extra }] }] })[0]!;
+        assert.equal(missing.matches, undefined); assert.equal(missing.preview, undefined);
+    }
+});
+
+test('pipeline log reads preserve build/log identity and requested versus returned portions', () => {
+    const tool = { kind: 'toolInvocationSerialized', toolId: 'mcp_azuredevops_3_pipelines_build_log', toolCallId: 'log-read',
+        source: { type: 'mcp' }, isComplete: true, isConfirmed: { type: 1 }, toolSpecificData: { rawInput: {
+            action: 'get_content', project: 'Demo', buildId: 400, logId: 12, startLine: 101, endLine: 220 } } };
+    const extract = (value: unknown) => extractResourceActivity({ requests: [{ response: [{ ...tool, resultDetails: {
+        output: [{ isText: true, value: JSON.stringify(value) }] } }] }] })[0]!;
+    const entry = extract(['PRIVATE_LOG', 'second']);
+    assert.equal(entry.buildId, 400); assert.equal(entry.logId, 12); assert.equal(entry.responseLines, 2);
+    assert.deepEqual(entry.requestedLogRange, { startLine: 101, endLine: 220 }); assert.equal(entry.range, undefined);
+    assert.equal(entry.evidence, 'log-content'); assert.equal(JSON.stringify(resourceMetadata([entry])).includes('PRIVATE_LOG'), false);
+    assert.equal(extract(['']).responseLines, 1, 'A returned blank log line counts as one line');
+    assert.equal(extract([]).responseLines, 0, 'An empty log response counts as zero lines');
+    const explicit = extract({ buildId: 400, logId: 12, startLine: 101, endLine: 102, lines: ['first', 'second'],
+        webUrl: 'https://dev.azure.com/example/Demo/_build/results?buildId=400&token=secret' });
+    assert.deepEqual(explicit.range, { startLine: 101, endLine: 102 });
+    assert.equal(explicit.url, 'https://dev.azure.com/example/Demo/_build/results?buildId=400');
+    assert.equal(extract({ buildId: 401, content: 'wrong' }).outcome, 'unavailable');
+    assert.equal(extract([{ id: 1, lineCount: 100 }]).outcome, 'unavailable');
+    for (const extra of [{ isError: true }, { isComplete: false }, { isCancelled: true }]) {
+        const unavailable = extractResourceActivity({ requests: [{ response: [{ ...tool, ...extra,
+            resultDetails: { output: [{ isText: true, value: '["PRIVATE_LOG"]' }] } }] }] })[0]!;
+        assert.equal(unavailable.preview, undefined); assert.equal(unavailable.evidence, 'none');
+    }
+    const list = { ...tool, toolSpecificData: { rawInput: { action: 'list', buildId: 400 } } };
+    assert.deepEqual(extractResourceActivity({ requests: [{ response: [list] }] }), []);
+    const encoded = { ...tool, resultDetails: { output: [{ type: 'embed', isText: false, asResource: true, mimeType: 'text/plain',
+        value: Buffer.from('first\nsecond').toString('base64') }] } };
+    assert.equal(extractResourceActivity({ requests: [{ response: [encoded] }] })[0]?.responseLines, 2);
+    const exported = { resources: [entry] }; redactResourceActivity(exported, false);
+    assert.equal(JSON.stringify(exported).includes('PRIVATE_LOG'), false);
+    redactResourceActivity(exported, true); assert.deepEqual(exported, {});
+    assert.equal(resourceLink('https://evil.example/_build/results?buildId=400', 'logs'), undefined);
+    assert.equal(resourceLink('https://dev.azure.com/example/_build/results?buildId=0', 'logs'), undefined);
+});
+
 test('saved MCP text-resource attachments decode without fetching their URI or fabricating source ranges', () => {
     const body = Array.from({ length: 31 }, (_, index) => `sample line ${index + 1}`).join('\n');
     const block = { type: 'embed', isText: false, asResource: true, mimeType: 'text/plain',
