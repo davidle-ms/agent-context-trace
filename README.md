@@ -1,10 +1,10 @@
 # Agent Context Trace
 
-A VS Code extension that shades filenames in the built-in **Explorer** and recorded sections inside open editors by how often they were read in the selected session. Editor sections use progressively stronger amber backgrounds with amber edge markers; Explorer filenames use matching amber frequency shades. Syntax colors are unchanged, and no inline count labels are added. **Agent Read Coverage** contains session controls and status only, with no duplicate file tree. The eye toggle controls both surfaces without stopping history refresh or optional tracker recording.
+A VS Code extension that shades filenames in the built-in **Explorer** and recorded sections inside open editors by how often they were read in the selected session. Editor sections use progressively stronger amber backgrounds with amber edge markers; Explorer filenames use matching amber frequency shades. Syntax colors are unchanged, and no inline count labels are added. **Agent Read Coverage** contains session controls, status, and an interactive heatmap of the open file, with no duplicate file tree. The eye toggle controls filenames, editor shading, and the heatmap without stopping history refresh or optional tracker recording.
 
 ## Preview Status
 
-The preview includes an existing Copilot chat picker, a read-only local-history adapter, built-in Explorer and editor-section decorations, and a persistent color toggle. Explicit instrumented tracker sessions remain available as an optional fallback. This is not a complete observer of all Copilot activity.
+The preview includes an existing Copilot chat picker, a read-only local-history adapter, built-in Explorer and editor-section decorations, a hover-to-navigate file heatmap, and a persistent color toggle. Explicit instrumented tracker sessions remain available as an optional fallback. This is not a complete observer of all Copilot activity.
 
 **Existing chat mode** recognizes supported completed/confirmed `copilot_readFile` entries in saved VS Code chat history. It does not require starting a tracker or using `#agentContextRead`. **Tracker mode** records only reads through that contributed tool. Neither mode infers reads from file visibility, search results, terminal commands, or prompt attachments. A colored file means recorded evidence exists at that path, not that the whole file or current revision was read or understood.
 
@@ -16,7 +16,7 @@ Requires Node.js 22 or later, npm, desktop VS Code, and a trusted local workspac
 2. Run `npm run compile`.
 3. Press **F5** and select **Run Extension** to open an Extension Development Host.
 4. Open a trusted local repository in that window. Start with synthetic or non-sensitive files.
-5. Expand **Agent Read Coverage** in Explorer for its session controls and status. Browse files in the normal Explorer above it.
+5. Expand **Agent Read Coverage** in Explorer for its session controls and active-file heatmap. Browse files in the normal Explorer above it.
 
 Alternatively, run `npm run package` and install the resulting VSIX using **Extensions: Install from VSIX**. The repository is private and the preview is unlicensed; do not publish it to the Marketplace without a separate licensing and release decision.
 
@@ -65,6 +65,18 @@ Disable `agentContextTrace.showUnverifiedHistoryRanges` to show only revision-ve
 
 Only visible local editors with matching recorded paths are processed, including split panes. Document fingerprints are cached by document version in memory, are not persisted for history guides, and are bounded to 1 MiB. Opening files or updating decorations never generates agent-read events or modifies source. The absence of section highlights is not proof that the agent did not read that section.
 
+## File Heatmap
+
+Choose a session, then open a local workspace file. **Agent Read Coverage** follows the active editor and shows its relative path, a vertical map from line 1 to the last line, and the same four amber frequency shades used inside the editor. It does not add a second file browser. In split editors, the most recently active text editor is the navigation target; focusing the heatmap retains that target while it stays visible.
+
+Move the pointer down the map to scroll the corresponding source line into view, centered where possible. Hovering does not move the cursor, change selections, edit source, or record reads. The readout shows the mapped line, exact displayed count, and revision caveat. Click to focus that line in the editor. With keyboard focus on the heatmap, use Up/Down, Page Up/Page Down, or Home/End to navigate, and Enter/Space to focus the line.
+
+The outlined window on the heatmap tracks the editor's visible line range as you scroll. The map represents logical source lines, not wrapped screen rows. Long files compress multiple lines into each pixel; keyboard navigation gives exact single-line positioning. Drag the divider above Agent Read Coverage upward for a taller map. Its compact layout fits a short section, but VS Code controls the section's initial height.
+
+The heatmap reuses the editor's displayed ranges, including revision checks, historical opt-out, dirty-buffer handling, and session isolation. Missing or stale ranges stay uncolored; they are not inferred as whole-file reads. Editing clears stale history colors in both places. The existing eye button also hides the heatmap. No-session, no-file, oversized-file, and unavailable-range states are explicit.
+
+The embedded view receives only relative filenames, line counts, displayed read ranges, and viewport metadata, never source text or chat content. Its nonce-restricted scripts and styles load no network resources, and navigation messages are checked against the current file/session view and line bounds. Switching files or sessions invalidates pending navigation messages.
+
 ## Optional Instrumented Tracker
 
 1. Run **Agent Context Trace: Start Session** and enter a name. This copies a tool reference with the tracker session ID to your clipboard.
@@ -108,7 +120,7 @@ Browse and open files in the normal Explorer. Right-click a file there and choos
 | `npm run check-types` | Strict TypeScript validation. |
 | `npm run compile` | Compile tests and bundle the extension. |
 | `npm run test:unit` | Sixteen tests covering per-line frequency, inclusive overlaps, tier boundaries, deduplication, large intervals, revision checks, historical line-range formats, workspace association, chat replay/extraction, read-only handling, path scope, persistence, and attribution. |
-| `npm run test:extension` | Four amber filename, vertical-marker, and background tiers, unchanged syntax colors and no inline labels, exact-count tooltip, per-line overlaps, deduplication, edit invalidation, split editors, shared toggle, grouped picker, and restart persistence. |
+| `npm run test:extension` | Native heatmap pixels, compact/expanded layouts, long-file hover alignment, keyboard navigation, cursor/source preservation, file switching, edit invalidation, four amber tiers, exact-count tooltips, split editors, shared toggle, grouped picker, and restart persistence. |
 | `npm run package` | Produce a self-contained VSIX without runtime npm installation. |
 
 The host test runner downloads VS Code 1.100.0 by default. To use an installed executable in PowerShell, set `$env:VSCODE_EXECUTABLE_PATH` to the full path of its executable before running the test command. Tests use temporary workspaces/profiles, and screenshots are written to the ignored `.vscode-test/screenshots` directory. TypeScript validation is temporarily disabled in the test profile so placeholder-code diagnostics do not override filename palette checks; normal user settings are untouched. Only the test windows expose local debugging endpoints; the extension does not start a server.

@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import { Root, ReadEvent, Session, summary, TraceStore, resolveFile, hash, MAX_FILE_BYTES, readHighlightRanges, ReadRange, readFrequency, ReadFrequency } from './core';
+import { Root, ReadEvent, Session, summary, TraceStore, resolveFile, hash, MAX_FILE_BYTES, readHighlightRanges, ReadRange, readFrequency, ReadFrequency, isWithin } from './core';
 import { HistoryRead, HistorySession, historyStatus, HistoryEntry, groupHistory } from './history';
+import { heatmapHtml } from './heatmap';
 
 const frequencyColors = {
     single: { background: 'readSectionBackground', border: 'readSectionBorder', filename: 'readFileForeground' },
@@ -32,12 +33,15 @@ export function historyPickerItems(entries: readonly HistoryEntry[]): HistoryPic
     return items;
 }
 
-export class CoverageView implements vscode.TreeDataProvider<never>, vscode.FileDecorationProvider, vscode.Disposable {
+export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDecorationProvider, vscode.Disposable {
     private readonly changed = new vscode.EventEmitter<void>();
     private readonly decorated = new vscode.EventEmitter<vscode.Uri[]>();
-    readonly onDidChangeTreeData = this.changed.event;
+    readonly onDidChange = this.changed.event;
     readonly onDidChangeFileDecorations = this.decorated.event;
-    readonly tree: vscode.TreeView<never>;
+    private webview: vscode.WebviewView | undefined;
+    private heatmapEditor: vscode.TextEditor | undefined;
+    private heatmapToken = 0;
+    statusMessage = '';
     private readonly disposables: vscode.Disposable[] = [];
     private selectedId: string | undefined;
     private history: HistorySession | undefined;
@@ -51,8 +55,9 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
 
     constructor(private readonly context: vscode.ExtensionContext, private readonly store: TraceStore, private readonly roots: readonly Root[]) {
         this.enabled = context.workspaceState.get('fileColorsEnabled', true);
-        this.tree = vscode.window.createTreeView('agentContextTrace.readCoverage', { treeDataProvider: this });
-        this.disposables.push(this.tree, this.changed, this.decorated, vscode.window.registerFileDecorationProvider(this));
+        this.heatmapEditor = vscode.window.activeTextEditor;
+        this.disposables.push(vscode.window.registerWebviewViewProvider('agentContextTrace.readCoverage', this),
+            this.changed, this.decorated, vscode.window.registerFileDecorationProvider(this));
         for (const frequency of Object.keys(frequencyColors) as ReadFrequency[]) {
             const colors = frequencyColors[frequency];
             const decoration = vscode.window.createTextEditorDecorationType({
@@ -68,6 +73,13 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
             this.disposables.push(decoration);
         }
         this.disposables.push(
+            vscode.window.onDidChangeActiveTextEditor(editor => {
+                if (editor || !vscode.window.visibleTextEditors.includes(this.heatmapEditor!)) { this.heatmapEditor = editor; }
+                this.refreshHeatmap();
+            }),
+            vscode.window.onDidChangeTextEditorVisibleRanges(event => {
+                if (event.textEditor === this.heatmapEditor) { this.postViewport(); }
+            }),
             vscode.window.onDidChangeVisibleTextEditors(() => this.refreshEditorHighlights()),
             vscode.workspace.onDidChangeTextDocument(event => {
                 if (!event.contentChanges.length) { return; }
@@ -132,14 +144,13 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
                 affectedFiles.set(key, uri);
             }
         }
-        this.tree.description = `${session?.label ?? 'No session selected'} | Colors ${this.enabled ? 'on' : 'off'}`;
-        this.tree.message = session?.coverage === 'copilot-history-read-metadata' ? historyStatus(session) : 'Instrumented reads only';
-        if (session?.events.length) { this.tree.message += '\nAmber shading: 1 / 2-3 / 4-7 / 8+ reads. Hover for exact counts.'; }
+        if (this.webview) { this.webview.description = `${session?.label ?? 'No session selected'} | Colors ${this.enabled ? 'on' : 'off'}`; }
+        this.statusMessage = session?.coverage === 'copilot-history-read-metadata' ? historyStatus(session) : 'Instrumented reads only';
         if (session?.coverage === 'copilot-history-read-metadata' && session.events.length
             && !session.events.some(event => event.startLine !== undefined && event.endLine !== undefined)) {
-            this.tree.message += '\nSection highlights unavailable: no line ranges saved.';
+            this.statusMessage += '\nSection highlights unavailable: no line ranges saved.';
         }
-        this.tree.badge = { value: this.index.size, tooltip: 'Files with recorded reads in the selected tracker session' };
+        if (this.webview) { this.webview.badge = { value: this.index.size, tooltip: 'Files with recorded reads in the selected session' }; }
         void vscode.commands.executeCommand('setContext', 'agentContextTrace.fileColorsEnabled', this.enabled);
         this.decorated.fire([...affectedFiles.values()]);
         this.refreshEditorHighlights();
@@ -179,11 +190,79 @@ export class CoverageView implements vscode.TreeDataProvider<never>, vscode.File
                 ]);
             }
         }
+        this.refreshHeatmap();
     }
 
-    getChildren(): never[] { return []; }
+    resolveWebviewView(view: vscode.WebviewView): void {
+        this.webview = view;
+        view.webview.options = { enableScripts: true, localResourceRoots: [] };
+        view.webview.html = heatmapHtml();
+        const messages = view.webview.onDidReceiveMessage((message: unknown) => {
+            if (!message || typeof message !== 'object') { return; }
+            const value = message as Record<string, unknown>;
+            if (value.type === 'ready') { this.refreshHeatmap(); }
+            else if (value.type === 'navigate') { this.navigateHeatmap(value); }
+        });
+        const visibility = view.onDidChangeVisibility(() => { if (view.visible) { this.refreshHeatmap(); } });
+        view.onDidDispose(() => {
+            messages.dispose(); visibility.dispose();
+            if (this.webview === view) { this.webview = undefined; }
+        });
+        this.refresh();
+    }
 
-    getTreeItem(): vscode.TreeItem { throw new Error('Agent Read Coverage contains controls and status only.'); }
+    setStatus(message: string): void {
+        this.statusMessage = message;
+        this.refreshHeatmap();
+    }
+
+    private heatmapTarget(): vscode.TextEditor | undefined {
+        const editor = this.heatmapEditor;
+        return editor && !editor.document.isClosed && editor.document.uri.scheme === 'file'
+            && vscode.window.visibleTextEditors.includes(editor)
+            && this.roots.some(root => isWithin(root.directory, editor.document.uri.fsPath)) ? editor : undefined;
+    }
+
+    private visibleLines(): { startLine: number; endLine: number } | undefined {
+        const editor = this.heatmapTarget();
+        const ranges = editor?.visibleRanges;
+        return editor && ranges?.length ? { startLine: ranges[0]!.start.line + 1,
+            endLine: Math.min(editor.document.lineCount, ranges[ranges.length - 1]!.end.line + 1) } : undefined;
+    }
+
+    private postViewport(): void {
+        void this.webview?.webview.postMessage({ type: 'viewport', token: this.heatmapToken, visible: this.visibleLines() });
+    }
+
+    private refreshHeatmap(): void {
+        this.heatmapToken++;
+        if (!this.webview?.visible) { return; }
+        const editor = this.heatmapTarget();
+        const document = editor?.document;
+        const session = this.selected();
+        const highlights = document ? this.editorHighlights(document) : { verified: [], unverified: [] };
+        const ranges = [...highlights.verified.map(range => ({ ...range, verified: true })),
+            ...highlights.unverified.map(range => ({ ...range, verified: false }))];
+        const tooLarge = document && document.offsetAt(new vscode.Position(document.lineCount, 0)) > MAX_FILE_BYTES;
+        const navigable = !!document && !!session && this.enabled && !tooLarge;
+        const empty = !session ? 'No session selected' : !document ? 'No local workspace file open' : !this.enabled ? 'Read colors off'
+            : tooLarge ? 'File exceeds highlight size limit' : !ranges.length ? 'No displayable read ranges for this file' : '';
+        void this.webview.webview.postMessage({ type: 'state', token: this.heatmapToken, filename: document ? vscode.workspace.asRelativePath(document.uri, true) : '',
+            lineCount: document?.lineCount ?? 0, status: this.statusMessage, navigable, empty, ranges, visible: this.visibleLines() });
+    }
+
+    private navigateHeatmap(message: Record<string, unknown>): void {
+        const editor = this.heatmapTarget();
+        if (!editor || !this.enabled || !(this.history || this.selectedId) || message.token !== this.heatmapToken
+            || typeof message.line !== 'number' || !Number.isInteger(message.line)
+            || message.line < 1 || message.line > editor.document.lineCount || typeof message.focus !== 'boolean') { return; }
+        const position = new vscode.Position(message.line - 1, 0);
+        editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+        if (message.focus) {
+            void vscode.window.showTextDocument(editor.document, { viewColumn: editor.viewColumn,
+                preserveFocus: false, selection: new vscode.Range(position, position) });
+        }
+    }
 
     provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
         if (!this.enabled || uri.scheme !== 'file' || !this.fileUris.has(this.fileKey(uri))) { return; }

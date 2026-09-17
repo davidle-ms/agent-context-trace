@@ -232,8 +232,8 @@ export class Runtime {
                 void this.refreshCopilotHistory().catch((error: unknown) => {
                     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
                         this.view.clearHistory();
-                        this.view.tree.message = 'Selected chat history file is unavailable';
-                    } else { this.view.tree.message = 'History update unavailable; showing last loaded snapshot'; }
+                        this.view.setStatus('Selected chat history file is unavailable');
+                    } else { this.view.setStatus('History update unavailable; showing last loaded snapshot'); }
                 });
             }, 400);
         };
@@ -241,7 +241,7 @@ export class Runtime {
             if (!name || name.toString() === path.basename(file)) { schedule(); }
         });
         this.historyWatcher.on('error', () => {
-            this.view.tree.message = 'History watcher unavailable; use Refresh Repository';
+            this.view.setStatus('History watcher unavailable; use Refresh Repository');
         });
         this.refresh();
         await this.refreshCopilotHistory();

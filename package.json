@@ -35,6 +35,7 @@
         {
           "id": "agentContextTrace.readCoverage",
           "name": "Agent Read Coverage",
+          "type": "webview",
           "when": "isWorkspaceTrusted"
         }
       ]

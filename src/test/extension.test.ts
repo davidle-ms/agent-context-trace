@@ -27,7 +27,7 @@ export async function run(): Promise<void> {
     const sourceUri = vscode.Uri.file(filePath);
     const neutralUri = vscode.Uri.file(path.join(root.directory, 'neutral.ts'));
     const otherUri = vscode.Uri.file(path.join(otherRoot.directory, 'source.ts'));
-    assert.deepEqual(runtime.view.getChildren(), [], 'Coverage controls never enumerate workspace directories');
+    assert.equal(extension.packageJSON.contributes.views.explorer[0].type, 'webview', 'Heatmap replaces the controls-only tree');
     if (process.env.ACT_TEST_PHASE === 'restore') {
         const previous = runtime.store.list().find(session => session.label === 'Host test');
         assert.ok(previous, 'Session JSON restored independently of test-mode workspace state');
@@ -56,7 +56,7 @@ export async function run(): Promise<void> {
             creationDate: Date.now(), requests: [{ response: [] }] } }) + '\n';
         const waitForReads = (count: number) => new Promise<void>((resolve, reject) => {
             const timeout = setTimeout(() => { subscription.dispose(); reject(new Error('Selected history watcher did not refresh.')); }, 10000);
-            const subscription = runtime.view.onDidChangeTreeData(() => {
+            const subscription = runtime.view.onDidChange(() => {
                 if (runtime.view.selected()?.events.length === count) { clearTimeout(timeout); subscription.dispose(); resolve(); }
             });
         });
@@ -66,12 +66,12 @@ export async function run(): Promise<void> {
         assert.equal(runtime.store.current(), undefined);
         assert.equal(runtime.view.selected()?.label, 'Existing Copilot Chat');
         assert.equal(runtime.view.provideFileDecoration(vscode.Uri.file(sourceFile)), undefined);
-        assert.match(String(runtime.view.tree.message), /no completed supported file reads saved yet/);
+        assert.match(runtime.view.statusMessage, /no completed supported file reads saved yet/);
         const firstRead = waitForReads(1);
         const firstAppend = JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: [read] }) + '\n';
         await fs.appendFile(file, firstAppend);
         await firstRead;
-        assert.match(String(runtime.view.tree.message), /1 recorded read in this repository/);
+        assert.match(runtime.view.statusMessage, /1 recorded read in this repository/);
         assert.equal(runtime.view.provideFileDecoration(vscode.Uri.file(sourceFile))?.badge, 'R');
         assert.equal(runtime.view.selected()?.events[0]?.startLine, undefined, 'Missing historical range is not fabricated');
         assert.deepEqual(runtime.view.editorHighlights(await vscode.workspace.openTextDocument(sourceUri)), { verified: [], unverified: [] }, 'File-only history never highlights the whole file');
@@ -82,11 +82,10 @@ export async function run(): Promise<void> {
             pastTenseMessage: { value: `Read [file](${neutralUri.toString()})` } }] }) + '\n';
         await fs.appendFile(file, append);
         await updated;
-        assert.match(String(runtime.view.tree.message), /2 recorded reads in this repository/);
+        assert.match(runtime.view.statusMessage, /2 recorded reads in this repository/);
         assert.equal(runtime.view.enabled, false, 'History refresh does not turn colors on');
         await runtime.view.toggle();
         assert.equal(runtime.view.provideFileDecoration(neutralUri)?.badge, 'R');
-        assert.deepEqual(runtime.view.getChildren(), [], 'Historical reads never create duplicate file entries');
         assert.equal(await fs.readFile(file, 'utf8'), initial + firstAppend + append, 'Extension never edits Copilot chat history');
         assert.equal(runtime.store.list().length, 0);
         console.log('PASS: existing Copilot chat selection, no tracker session, file-only history colors, selected history watcher, toggle, read-only source');
@@ -166,6 +165,25 @@ export async function run(): Promise<void> {
         assert.ok(page, 'Native VS Code workbench renderer is reachable');
         const section = page.locator('.pane').filter({ has: page.getByText('Agent Read Coverage', { exact: true }) }).first();
         await section.waitFor({ state: 'visible' });
+        const heatmap = page.frameLocator('iframe.webview').frameLocator('#active-frame');
+        const canvas = heatmap.locator('#heatmap');
+        await canvas.waitFor({ state: 'visible' });
+        assert.match(await heatmap.locator('#filename').textContent() ?? '', /repo-one.*source.ts/);
+        assert.equal(await canvas.evaluate(() => globalThis.document.documentElement.scrollWidth <= window.innerWidth), true, 'Compact heatmap has no horizontal overflow');
+        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'file-heatmap-compact.png') });
+        const sectionBounds = await section.boundingBox();
+        assert.ok(sectionBounds);
+        const sash = await page.locator('.monaco-sash.horizontal').evaluateAll((elements, bounds) => elements
+            .map(element => element.getBoundingClientRect()).filter(rect => rect.width > 100 && rect.x >= bounds.x - 4
+                && rect.x < bounds.x + bounds.width && Math.abs(rect.y - bounds.y) < 8)
+            .map(rect => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }))[0], sectionBounds);
+        assert.ok(sash, 'Native divider above Agent Read Coverage is available');
+        await page.mouse.move(sash.x, sash.y);
+        await page.mouse.down();
+        await page.mouse.move(sash.x, sash.y - 300, { steps: 12 });
+        await page.mouse.up();
+        const expandedMap = await canvas.boundingBox();
+        assert.ok(expandedMap && expandedMap.height > 150, 'Native divider gives the heatmap useful vertical space');
         await page.waitForFunction(() => {
             const pane = Array.from(globalThis.document.querySelectorAll('.pane')).find(element => element.textContent?.includes('Agent Read Coverage'));
             return pane && pane.querySelectorAll('.monaco-list-row').length === 0;
@@ -210,8 +228,8 @@ export async function run(): Promise<void> {
             assert.equal(mark.background, verifiedMarks[0]!.background, 'History and verified reads have identical shading');
             assert.equal(mark.border, verifiedMarks[0]!.border, 'History and verified reads have identical borders');
         }
-        assert.match(String(runtime.view.tree.message), /Amber shading: 1 \/ 2-3 \/ 4-7 \/ 8\+ reads/);
-        await section.getByText(/Local Copilot history: 1 recorded read in this repository/).waitFor();
+        assert.match(runtime.view.statusMessage, /Local Copilot history: 1 recorded read in this repository/);
+        await heatmap.locator('#status').filter({ hasText: /Local Copilot history: 1 recorded read in this repository/ }).waitFor();
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-sections-history.png') });
         const frequencySession: HistorySession = {
             id: 'copilot:frequency-preview', label: 'Session read frequency', createdAt: '', coverage: 'copilot-history-read-metadata',
@@ -260,7 +278,6 @@ export async function run(): Promise<void> {
             assert.ok(frequencyMarks[index]!.lineTop > frequencyMarks[index - 1]!.lineTop);
             assert.ok(frequencyMarks[index]!.alpha > frequencyMarks[index - 1]!.alpha, 'Repeated-read backgrounds have progressively stronger amber shading');
         }
-        await section.getByText(/Amber shading: 1 \/ 2-3 \/ 4-7 \/ 8\+ reads/).waitFor();
         assert.equal(await page.locator('.monaco-editor .view-lines span').evaluateAll(elements => elements
             .filter(element => /^"Read \d+ times?"$/.test(getComputedStyle(element, '::after').content)).length), 0, 'No inline count labels are added');
         const textColors = () => page.locator('.monaco-editor .view-lines .view-line span').evaluateAll(elements => elements
@@ -269,11 +286,88 @@ export async function run(): Promise<void> {
         const shadedTextColors = await textColors();
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-frequency-amber.png') });
         await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'read-frequency-shades.png') });
+        await canvas.evaluate(element => new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Amber heatmap pixels did not update')), 5000);
+            const check = () => {
+                const map = element as HTMLCanvasElement;
+                const pixel = map.getContext('2d')!.getImageData(1, Math.floor(map.height * 0.7), 1, 1).data;
+                if (pixel[0] === 191 && pixel[1] === 132 && pixel[2] === 28) { clearTimeout(timeout); resolve(); }
+                else { requestAnimationFrame(check); }
+            };
+            check();
+        }));
+        const heatPixels = await canvas.evaluate(element => {
+            const map = element as HTMLCanvasElement;
+            return [0.1, 0.3, 0.5, 0.7].map(fraction => Array.from(map.getContext('2d')!
+                .getImageData(1, Math.floor(map.height * fraction), 1, 1).data));
+        });
+        assert.deepEqual(heatPixels.map(pixel => pixel.slice(0, 3)), [[232, 179, 90], [218, 160, 68], [204, 144, 46], [191, 132, 28]],
+            'Rendered heatmap pixels match the four editor amber tiers');
         const fourthLine = page.locator('.monaco-editor .view-lines .view-line').getByText('fourth', { exact: true }).first();
         await fourthLine.hover({ position: { x: 4, y: 6 } });
         await page.getByText(/Lines 4-4: 8 recorded reads in this session/).waitFor();
         await page.keyboard.press('Escape');
-        await section.hover();
+        const heatmapUri = vscode.Uri.file(path.join(root.directory, 'heatmap-preview.ts'));
+        const heatmapSource = Array.from({ length: 240 }, (_, index) => `const value${index + 1} = ${index + 1};`).join('\n');
+        await fs.writeFile(heatmapUri.fsPath, heatmapSource);
+        const longDocument = await vscode.workspace.openTextDocument(heatmapUri);
+        const longEditor = await vscode.window.showTextDocument(longDocument, { preview: false });
+        const longSession: HistorySession = { ...frequencySession, id: 'copilot:long-heatmap', label: 'Heatmap navigation',
+            events: [1, 61, 121, 121, 181, 181, 181, 181].map((startLine, index) => ({ id: `long-${index}`,
+                rootId: root.id, relativePath: 'heatmap-preview.ts', startLine, endLine: 240 })) };
+        runtime.view.showHistory(longSession);
+        await heatmap.locator('#filename').filter({ hasText: 'heatmap-preview.ts' }).waitFor();
+        const selectionBefore = longEditor.selection;
+        const waitForLine = (line: number) => new Promise<void>((resolve, reject) => {
+            const containsLine = () => longEditor.visibleRanges.some(range => range.start.line <= line - 1 && range.end.line >= line - 1);
+            if (containsLine()) { resolve(); return; }
+            const timeout = setTimeout(() => { listener.dispose(); reject(new Error(`Heatmap did not reveal line ${line}`)); }, 5000);
+            const listener = vscode.window.onDidChangeTextEditorVisibleRanges(event => {
+                if (event.textEditor === longEditor && containsLine()) { clearTimeout(timeout); listener.dispose(); resolve(); }
+            });
+        });
+        for (const [line, count] of [[240, 8], [1, 1], [61, 2], [121, 4], [181, 8]] as const) {
+            const bounds = await canvas.boundingBox();
+            assert.ok(bounds);
+            const revealed = waitForLine(line);
+            await canvas.hover({ position: { x: bounds.width / 2, y: (line - 0.5) / 240 * bounds.height } });
+            await heatmap.locator('#position').filter({ hasText: `Line ${line} / 240 | ${count} recorded reads` }).waitFor();
+            await revealed;
+            assert.ok(longEditor.selection.isEqual(selectionBefore), 'Hover scrolls without moving the editor cursor');
+        }
+        assert.equal(longDocument.getText(), heatmapSource, 'Heatmap navigation does not edit source');
+        assert.equal(runtime.view.selected()?.events.length, 8, 'Heatmap navigation never records reads');
+        assert.match(await heatmap.locator('#position').textContent() ?? '', /Historical range; file may have changed/);
+        await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'file-heatmap-hover.png') });
+        await canvas.focus();
+        const topRevealed = waitForLine(1);
+        await canvas.press('Home');
+        await topRevealed;
+        await canvas.press('Enter');
+        await page.waitForFunction(() => !!globalThis.document.querySelector('.monaco-editor.focused'));
+        assert.equal(longEditor.selection.active.line, 0, 'Keyboard commit focuses the mapped editor line');
+        await runtime.view.toggle();
+        await heatmap.locator('#empty').filter({ hasText: 'Read colors off' }).waitFor();
+        assert.equal(await canvas.isVisible(), false, 'Eye toggle also hides the heatmap');
+        await runtime.view.toggle();
+        await canvas.waitFor({ state: 'visible' });
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(otherUri));
+        await heatmap.locator('#filename').filter({ hasText: 'repo-two' }).waitFor();
+        await heatmap.locator('#empty').filter({ hasText: 'No displayable read ranges' }).waitFor();
+        await vscode.window.showTextDocument(longDocument);
+        await heatmap.locator('#filename').filter({ hasText: 'heatmap-preview.ts' }).waitFor();
+        const heatmapEdit = new vscode.WorkspaceEdit();
+        heatmapEdit.insert(heatmapUri, new vscode.Position(0, 0), ' ');
+        await vscode.workspace.applyEdit(heatmapEdit);
+        await heatmap.locator('#empty').filter({ hasText: 'No displayable read ranges' }).waitFor();
+        await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+        await vscode.window.showTextDocument(document, { viewColumn: sourceEditor.viewColumn, preview: false });
+        runtime.view.showHistory(frequencySession);
+        await heatmap.locator('#filename').filter({ hasText: 'repo-one/source.ts' }).waitFor();
+        await canvas.waitFor({ state: 'visible' });
+        await fs.unlink(heatmapUri.fsPath);
+        console.log('PASS: heatmap amber pixels, top/middle/bottom hover alignment, cursor preservation, keyboard navigation, file switching, edits, and eye toggle');
+        await section.locator('.pane-header').hover();
         await runtime.view.toggle();
         assert.deepEqual(runtime.view.editorHighlights(document), { verified: [], unverified: [] });
         await page.waitForFunction(() => !Array.from(globalThis.document.querySelectorAll('.monaco-editor .view-overlays .cdr'))
