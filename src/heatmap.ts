@@ -99,7 +99,7 @@ body {
 .repeat { --edge: var(--cp-repeat-edge); --shade: var(--cp-repeat); }
 .frequent { --edge: var(--cp-frequent-edge); --shade: var(--cp-frequent); }
 .intense { --edge: var(--cp-intense-edge); --shade: var(--cp-intense); }
-#map { flex: 1; min-height: 24px; position: relative; margin: 20px 0 20px 34px; }
+#map { flex: 1; min-height: 320px; position: relative; margin: 20px 0 20px 34px; }
 #map[hidden], #empty[hidden] { display: none; }
 #heatmap { width: 100%; height: 100%; position: absolute; display: block; cursor: crosshair; touch-action: none; background: var(--cp-surface); }
 #heatmap:focus-visible { outline: 1px solid var(--cp-border-strong); outline-offset: 2px; }

@@ -176,9 +176,10 @@ export async function run(): Promise<void> {
                 const scale = globalThis.document.getElementById('scale')!.getBoundingClientRect();
                 const readout = globalThis.document.getElementById('position')!.getBoundingClientRect();
                 const labels = Array.from(globalThis.document.querySelectorAll('.line-label')).map(label => label.getBoundingClientRect());
-                return { above: bounds.top - scale.bottom, below: readout.top - bounds.bottom,
+                return { height: bounds.height, above: bounds.top - scale.bottom, below: readout.top - bounds.bottom,
                     labelsSeparated: labels.every((label, index) => index === 0 || label.top >= labels[index - 1]!.bottom) };
             });
+            assert.ok(spacing.height >= 320, 'Heatmap stays at least 320px tall even in a short section');
             assert.ok(spacing.above >= 20 && spacing.below >= 20, 'Heatmap has readable space above and below');
             assert.ok(spacing.labelsSeparated, 'Line labels do not collide in compact or expanded views');
         };
