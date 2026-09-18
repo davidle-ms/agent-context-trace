@@ -455,6 +455,20 @@ export async function run(): Promise<void> {
         console.log('PASS: repository/wiki tabs, revision provenance, on-demand plain-text previews, Markdown headings, keyboard tabs, filtering, and session isolation');
         const searchLogs = extractHistory({ sessionId: 'search-log-preview', customTitle: 'Synthetic code search and pipeline log preview',
             requests: [{ timestamp: '2026-09-17T10:00:00Z', response: searchLogCalls() }] }, roots);
+        const commandCall = { kind: 'toolInvocationSerialized', toolId: 'run_in_terminal', toolCallId: 'timeline-command', isComplete: true,
+            isConfirmed: { type: 1 }, invocationMessage: { value: 'Run synthetic validation' }, toolSpecificData: {
+                commandLine: { original: 'npm test PRIVATE_COMMAND', forDisplay: 'npm test PRIVATE_COMMAND', isSandboxWrapped: false },
+                cwd: { scheme: 'file', fsPath: root.directory }, language: 'pwsh', isBackground: false,
+                terminalCommandState: { exitCode: 0, timestamp: Date.parse('2026-09-17T00:30:00Z'), duration: 125 },
+                terminalCommandOutput: { text: 'PRIVATE_TERMINAL_OUTPUT', lineCount: 1 }
+            } };
+        const commandSnapshot = { sessionId: 'evidence-timeline', requests: [
+            { timestamp: '2026-09-17T00:29:59Z', response: [commandCall] }
+        ] };
+        const commandSession = extractHistory(commandSnapshot, roots);
+        const timelineStorage = await fs.mkdtemp(path.join(os.tmpdir(), 'act-command-timeline-'));
+        const timelineFile = path.join(timelineStorage, 'evidence-timeline.json');
+        await fs.writeFile(timelineFile, JSON.stringify(commandSnapshot));
         const timelineSession: HistorySession = {
             ...workSession,
             id: 'copilot:evidence-timeline',
@@ -464,11 +478,12 @@ export async function run(): Promise<void> {
                 { id: 'timeline-local-neutral', rootId: root.id, relativePath: 'neutral.ts', at: '2026-09-17T00:00:00.800Z' }
             ],
             workItems: structuredClone(workSession.workItems),
-            resources: [...resourceSession.resources!, ...searchLogs.resources!]
+            resources: [...resourceSession.resources!, ...searchLogs.resources!],
+            commands: commandSession.commands
         };
         timelineSession.workItems![0]!.title = '<img src=x onerror=alert(1)>';
         await vscode.window.showTextDocument(neutralUri);
-        runtime.view.showHistory(timelineSession);
+        runtime.view.showHistory(timelineSession, timelineFile);
         await heatmap.getByRole('tab', { name: /^Timeline/ }).click();
         await heatmap.locator('#timeline-summary').filter({ hasText: '15 evidence events | oldest to newest' }).waitFor();
         const timelineEntries = heatmap.locator('#timeline-list .timeline-entry');
@@ -490,6 +505,26 @@ export async function run(): Promise<void> {
         assert.equal(await heatmap.locator('#timeline-panel img, #timeline-panel script').count(), 0, 'Timeline labels are rendered as text only');
         assert.equal((await heatmap.locator('#timeline-panel').textContent())?.includes('SAMPLE_SOURCE_ONLY'), false, 'Saved response bodies do not enter the timeline payload');
         assert.equal((await heatmap.locator('#timeline-panel').textContent())?.includes('PRIVATE_BODY'), false);
+        assert.equal(await heatmap.locator('#timeline-list [data-kind="command"]').count(), 0, 'Commands stay out of the evidence timeline');
+        await heatmap.getByRole('tab', { name: /^Command Timeline/ }).click();
+        await heatmap.locator('#command-summary').filter({ hasText: '1 command event | oldest to newest' }).waitFor();
+        const commandEntries = heatmap.locator('#command-list .timeline-entry');
+        assert.equal(await commandEntries.count(), 1);
+        assert.equal((await heatmap.locator('#command-panel').textContent())?.includes('PRIVATE_COMMAND'), false, 'Saved command text is opt-in');
+        assert.equal((await heatmap.locator('#command-panel').textContent())?.includes('PRIVATE_TERMINAL_OUTPUT'), false, 'Terminal output never enters the command timeline');
+        const commandEntry = commandEntries.first();
+        assert.match(await commandEntry.locator('.timeline-kind').textContent() ?? '', /Command \| Succeeded/);
+        assert.match(await commandEntry.locator('.timeline-detail').textContent() ?? '', /Exit code: 0/);
+        await heatmap.locator('#command-outcome').selectOption('failed');
+        assert.equal(await commandEntries.count(), 0);
+        await heatmap.locator('#command-outcome').selectOption('succeeded');
+        assert.equal(await commandEntries.count(), 1);
+        await commandEntry.getByRole('button', { name: 'Show saved command' }).click();
+        await commandEntry.locator('.timeline-command-preview').filter({ hasText: 'npm test PRIVATE_COMMAND' }).waitFor();
+        assert.equal((await commandEntry.textContent())?.includes('PRIVATE_TERMINAL_OUTPUT'), false);
+        await commandEntry.getByRole('button', { name: 'Hide saved command' }).click();
+        assert.equal((await commandEntry.textContent())?.includes('PRIVATE_COMMAND'), false, 'Hiding clears saved command text');
+        await heatmap.getByRole('tab', { name: /^Timeline/ }).click();
         await heatmap.locator('#timeline-kind').selectOption('repository');
         assert.equal(await timelineEntries.count(), 2);
         await heatmap.locator('#timeline-filter').fill('checkout.ts');
@@ -509,7 +544,8 @@ export async function run(): Promise<void> {
         await timelineEntries.getByRole('button', { name: 'Open source.ts' }).click();
         await heatmap.locator('#filename').filter({ hasText: 'source.ts' }).waitFor();
         assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), sourceUri.toString());
-        console.log('PASS: evidence timeline ordering, aggregation, text safety, filtering, local opening, and ADO detail navigation');
+        await fs.rm(timelineStorage, { recursive: true, force: true });
+        console.log('PASS: separate evidence and command timelines, ordering, aggregation, text safety, filtering, local opening, and ADO detail navigation');
         const ledgerStorage = await fs.mkdtemp(path.join(os.tmpdir(), 'act-change-ledger-'));
         try {
             const chatFolder = path.join(ledgerStorage, 'chatSessions');

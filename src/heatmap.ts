@@ -146,6 +146,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .timeline-list { position: relative; margin-left: 7px; border-left: 1px solid var(--cp-border); }
 .timeline-entry, .timeline-group { --timeline-color: #626262; --timeline-marker-fg: #fff; position: relative; margin: 0; padding: 8px 0 10px 18px; overflow-wrap: anywhere; }
 .timeline-entry[data-kind="local"], .timeline-group[data-kind="local"] { --timeline-color: #916900; }
+.timeline-entry[data-kind="command"], .timeline-group[data-kind="command"] { --timeline-color: #a13f63; }
 .timeline-entry[data-kind="work-item"], .timeline-group[data-kind="work-item"] { --timeline-color: #286bb3; }
 .timeline-entry[data-kind="repository"], .timeline-group[data-kind="repository"] { --timeline-color: #287858; }
 .timeline-entry[data-kind="wiki"], .timeline-group[data-kind="wiki"] { --timeline-color: #7a4b96; }
@@ -168,7 +169,9 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .timeline-detail { margin: 2px 0; color: var(--cp-text-muted); font-size: 11px; white-space: pre-wrap; }
 .timeline-kind { color: var(--cp-text-muted); font-size: 10px; text-transform: uppercase; }
 .timeline-actions { display: flex; flex-wrap: wrap; gap: 4px; }
-.timeline-actions button, #timeline-more { margin: 5px 0; border: 1px solid var(--cp-border); border-radius: 2px; padding: 3px 7px; color: var(--cp-text); background: var(--cp-surface); cursor: pointer; }
+.timeline-actions button, #timeline-more, #command-more { margin: 5px 0; border: 1px solid var(--cp-border); border-radius: 2px; padding: 3px 7px; color: var(--cp-text); background: var(--cp-surface); cursor: pointer; }
+.timeline-command-note { color: var(--cp-text-muted); font-size: 10px; margin: 3px 0; }
+.timeline-command-preview { max-height: 220px; margin: 4px 0; padding: 7px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--cp-surface); color: var(--cp-text); font: 11px/16px Consolas, monospace; }
 #status, #empty { color: var(--cp-text-muted); overflow-wrap: anywhere; flex-shrink: 0; }
 #status { font-size: 11px; max-height: 3.6em; overflow: auto; }
 #filename { margin: 0; font-size: 12px; line-height: 16px; overflow-wrap: anywhere; flex-shrink: 0; }
@@ -198,7 +201,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 }
 @media (max-width: 440px) { .change-controls { grid-template-columns: 1fr; } }
 </style></head><body>
-<div id="tabs" role="tablist" aria-label="Recorded context"><button id="file-tab" role="tab" aria-selected="true" aria-controls="content">File Heatmap</button><button id="timeline-tab" role="tab" aria-selected="false" aria-controls="timeline-panel" tabindex="-1">Timeline</button><button id="changes-tab" role="tab" aria-selected="false" aria-controls="changes-panel" tabindex="-1">Changes</button><button id="work-tab" role="tab" aria-selected="false" aria-controls="work-items" tabindex="-1">Work Items</button><button id="repository-tab" role="tab" aria-selected="false" aria-controls="repository-panel" tabindex="-1">Repository Files</button><button id="wiki-tab" role="tab" aria-selected="false" aria-controls="wiki-panel" tabindex="-1">Wiki Pages</button><button id="search-tab" role="tab" aria-selected="false" aria-controls="search-panel" tabindex="-1">Code Searches</button><button id="logs-tab" role="tab" aria-selected="false" aria-controls="logs-panel" tabindex="-1">Pipeline Logs</button></div>
+<div id="tabs" role="tablist" aria-label="Recorded context"><button id="file-tab" role="tab" aria-selected="true" aria-controls="content">File Heatmap</button><button id="timeline-tab" role="tab" aria-selected="false" aria-controls="timeline-panel" tabindex="-1">Timeline</button><button id="command-tab" role="tab" aria-selected="false" aria-controls="command-panel" tabindex="-1">Command Timeline</button><button id="changes-tab" role="tab" aria-selected="false" aria-controls="changes-panel" tabindex="-1">Changes</button><button id="work-tab" role="tab" aria-selected="false" aria-controls="work-items" tabindex="-1">Work Items</button><button id="repository-tab" role="tab" aria-selected="false" aria-controls="repository-panel" tabindex="-1">Repository Files</button><button id="wiki-tab" role="tab" aria-selected="false" aria-controls="wiki-panel" tabindex="-1">Wiki Pages</button><button id="search-tab" role="tab" aria-selected="false" aria-controls="search-panel" tabindex="-1">Code Searches</button><button id="logs-tab" role="tab" aria-selected="false" aria-controls="logs-panel" tabindex="-1">Pipeline Logs</button></div>
 <div id="content" role="tabpanel" aria-labelledby="file-tab">
 <div id="status"></div><h2 id="filename">No file open</h2>
 <div id="scale" aria-label="Recorded reads"><span class="single"><i></i>1</span><span class="repeat"><i></i>2-3</span><span class="frequent"><i></i>4-7</span><span class="intense"><i></i>8+</span></div>
@@ -211,11 +214,19 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 <div id="position" aria-live="polite"></div>
 <section id="timeline-panel" class="timeline-panel" role="tabpanel" aria-labelledby="timeline-tab" hidden>
 <h2>Agent Evidence Timeline</h2>
-<div class="timeline-note">Recorded evidence only. Correlated saved edits appear in the Change Ledger; terminal-command provenance remains unavailable.</div>
+<div class="timeline-note">Recorded file and Azure DevOps evidence only. Commands are shown separately in Command Timeline.</div>
 <div id="timeline-summary" class="timeline-summary"></div>
 <div class="timeline-controls"><input id="timeline-filter" type="search" aria-label="Filter evidence timeline" placeholder="Filter path, query, ID or outcome">
 <select id="timeline-kind" aria-label="Filter evidence type"><option value="">All evidence</option><option value="local">Local files</option><option value="work-item">Work items</option><option value="repository">Repository files</option><option value="wiki">Wiki pages</option><option value="search">Code searches</option><option value="logs">Pipeline logs</option></select></div>
 <div id="timeline-empty" class="timeline-empty"></div><div id="timeline-list" class="timeline-list"></div><button id="timeline-more" hidden>Show more</button>
+</section>
+<section id="command-panel" class="timeline-panel" role="tabpanel" aria-labelledby="command-tab" hidden>
+<h2>Command Timeline</h2>
+<div class="timeline-note">Saved command metadata only. Command text is loaded locally on request; terminal output is never displayed.</div>
+<div id="command-summary" class="timeline-summary"></div>
+<div class="timeline-controls"><input id="command-filter" type="search" aria-label="Filter command timeline" placeholder="Filter shell, working directory or outcome">
+<select id="command-outcome" aria-label="Filter command outcome"><option value="">All outcomes</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option><option value="cancelled">Cancelled or denied</option><option value="pending">Incomplete</option><option value="unavailable">Result unavailable</option></select></div>
+<div id="command-empty" class="timeline-empty"></div><div id="command-list" class="timeline-list"></div><button id="command-more" hidden>Show more</button>
 </section>
 <section id="changes-panel" class="change-panel" role="tabpanel" aria-labelledby="changes-tab" hidden>
 <h2>Change Ledger</h2>
@@ -255,7 +266,7 @@ const context = canvas.getContext('2d');
 let workState = { entries: [], empty: 'No session selected' };
 let workLimit = 50;
 let workSignature = '';
-const tabs = [['file-tab', 'content'], ['timeline-tab', 'timeline-panel'], ['changes-tab', 'changes-panel'], ['work-tab', 'work-items'], ['repository-tab', 'repository-panel'], ['wiki-tab', 'wiki-panel'], ['search-tab', 'search-panel'], ['logs-tab', 'logs-panel']];
+const tabs = [['file-tab', 'content'], ['timeline-tab', 'timeline-panel'], ['command-tab', 'command-panel'], ['changes-tab', 'changes-panel'], ['work-tab', 'work-items'], ['repository-tab', 'repository-panel'], ['wiki-tab', 'wiki-panel'], ['search-tab', 'search-panel'], ['logs-tab', 'logs-panel']];
 function chooseTab(tabId) {
   byId('position').hidden = tabId !== 'file-tab';
   for (const [id, panel] of tabs) {
@@ -273,12 +284,15 @@ byId('tabs').addEventListener('keydown', event => {
   const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
   chooseTab(tabs[index][0]); byId(tabs[index][0]).focus();
 });
-const outcomes = { returned: 'Response metadata returned', unavailable: 'Response metadata unavailable', failed: 'Failed call', cancelled: 'Cancelled or denied', pending: 'Incomplete or unconfirmed call' };
-const timelineKinds = { local: 'Local file', 'work-item': 'Work item', repository: 'Repository file', wiki: 'Wiki page', search: 'Code search', logs: 'Pipeline log' };
-const timelineIcons = { local: 'F', 'work-item': '#', repository: 'R', wiki: 'W', search: 'S', logs: '>' };
+const outcomes = { returned: 'Response metadata returned', unavailable: 'Response metadata unavailable', failed: 'Failed call', cancelled: 'Cancelled or denied', pending: 'Incomplete or unconfirmed call', succeeded: 'Succeeded' };
+const timelineKinds = { local: 'Local file', command: 'Command', 'work-item': 'Work item', repository: 'Repository file', wiki: 'Wiki page', search: 'Code search', logs: 'Pipeline log' };
+const timelineIcons = { local: 'F', command: '>', 'work-item': '#', repository: 'R', wiki: 'W', search: 'S', logs: 'L' };
 let timelineState = { entries: [], empty: 'No session selected' };
 let timelineLimit = 50;
 let timelineSignature = '';
+let commandState = { entries: [], empty: 'No session selected' };
+let commandLimit = 50;
+let commandSignature = '';
 function jumpToTimelineEvidence(item) {
   if (item.kind === 'local') return;
   chooseTab(item.tab);
@@ -292,7 +306,11 @@ function jumpToTimelineEvidence(item) {
   const entry = [...byId(item.kind + '-list').children].find(element => element.dataset.key === item.callId);
   if (entry) { if (entry.tagName === 'DETAILS') entry.open = true; entry.scrollIntoView({ block: 'nearest' }); entry.querySelector('summary, h3')?.focus(); }
 }
-function timelineOutcomeLabel(outcome) { return outcome === 'recorded' ? 'Read recorded' : outcomes[outcome]; }
+function timelineOutcomeLabel(kind, outcome) {
+  if (outcome === 'recorded') return 'Read recorded';
+  if (kind === 'command' && outcome === 'unavailable') return 'Result unavailable';
+  return outcomes[outcome];
+}
 function timelineMarker(kind, outcome) {
   const marker = document.createElement('span'); marker.className = 'timeline-marker'; marker.dataset.outcome = outcome;
   marker.setAttribute('aria-hidden', 'true');
@@ -301,7 +319,7 @@ function timelineMarker(kind, outcome) {
 function appendTimelineEntry(container, item) {
   const entry = document.createElement('article'); entry.className = 'timeline-entry'; entry.dataset.key = item.key; entry.dataset.kind = item.kind;
   const time = document.createElement('time'); time.className = 'timeline-time'; time.textContent = item.at ? new Date(item.at).toLocaleString() : 'Time unavailable'; if (item.at) time.dateTime = item.at;
-  const label = document.createElement('div'); label.className = 'timeline-kind'; label.textContent = timelineKinds[item.kind] + ' | ' + timelineOutcomeLabel(item.outcome);
+  const label = document.createElement('div'); label.className = 'timeline-kind'; label.textContent = timelineKinds[item.kind] + ' | ' + timelineOutcomeLabel(item.kind, item.outcome);
   const title = document.createElement('h3'); title.className = 'timeline-title'; title.textContent = item.title;
   const detail = document.createElement('p'); detail.className = 'timeline-detail'; detail.textContent = item.detail;
   const actions = document.createElement('div'); actions.className = 'timeline-actions';
@@ -314,11 +332,29 @@ function appendTimelineEntry(container, item) {
           callId: item.callId, rootId: target.rootId, relativePath: target.relativePath });
       }); actions.append(button);
     }
+  } else if (item.kind === 'command') {
+    if (item.commandAvailable) {
+      const button = document.createElement('button'); button.textContent = 'Show saved command';
+      button.addEventListener('click', () => {
+        const preview = entry.querySelector('.timeline-command-preview');
+        const note = entry.querySelector('.timeline-command-note');
+        if (!preview.hidden) { preview.hidden = true; preview.textContent = ''; note.textContent = ''; button.textContent = 'Show saved command'; return; }
+        note.textContent = 'Loading saved command locally...';
+        api.postMessage({ type: 'showTimelineCommand', sessionId: commandState.sessionId, callId: item.callId });
+      }); actions.append(button);
+    }
   } else {
     const button = document.createElement('button'); button.textContent = 'View details';
     button.addEventListener('click', () => jumpToTimelineEvidence(item)); actions.append(button);
   }
-  entry.append(timelineMarker(item.kind, item.outcome), time, label, title, detail, actions); container.append(entry);
+  entry.append(timelineMarker(item.kind, item.outcome), time, label, title, detail, actions);
+  if (item.kind === 'command') {
+    const note = document.createElement('div'); note.className = 'timeline-command-note';
+    if (!item.commandAvailable) note.textContent = 'Saved command text unavailable.';
+    const preview = document.createElement('pre'); preview.className = 'timeline-command-preview'; preview.hidden = true; preview.tabIndex = 0;
+    entry.append(note, preview);
+  }
+  container.append(entry);
 }
 function timelineSecond(at) {
   const value = at ? new Date(at).getTime() : Number.NaN;
@@ -345,7 +381,7 @@ function renderTimeline() {
   const fragment = document.createDocumentFragment();
   for (const group of groupTimelineEntries(filtered.slice(0, timelineLimit))) {
     if (group.entries.length === 1) { appendTimelineEntry(fragment, group.entries[0]); continue; }
-    const outcomesInGroup = [...new Set(group.entries.map(item => timelineOutcomeLabel(item.outcome)))];
+    const outcomesInGroup = [...new Set(group.entries.map(item => timelineOutcomeLabel(item.kind, item.outcome)))];
     const groupView = document.createElement('details'); groupView.className = 'timeline-group'; groupView.dataset.kind = group.kind;
     const summary = document.createElement('summary');
     const time = document.createElement('time'); time.className = 'timeline-time'; time.textContent = new Date(group.at).toLocaleString(); time.dateTime = group.at;
@@ -359,9 +395,52 @@ function renderTimeline() {
   }
   byId('timeline-list').replaceChildren(fragment); byId('timeline-more').hidden = filtered.length <= timelineLimit;
 }
+function renderCommandPreview(message) {
+  const entry = [...byId('command-list').querySelectorAll('.timeline-entry')]
+    .find(element => element.dataset.key === 'command:' + message.callId);
+  if (!entry) return;
+  const note = entry.querySelector('.timeline-command-note');
+  const preview = entry.querySelector('.timeline-command-preview');
+  const button = entry.querySelector('.timeline-actions button');
+  if (message.unavailable || typeof message.command !== 'string') {
+    note.textContent = 'Saved command text is unavailable.'; return;
+  }
+  preview.textContent = message.command; preview.hidden = false;
+  note.textContent = message.truncated ? 'Saved command shown; text is truncated at the local preview limit.' : 'Saved command shown from local chat history.';
+  if (button) button.textContent = 'Hide saved command';
+}
 byId('timeline-filter').addEventListener('input', () => { timelineLimit = 50; renderTimeline(); });
 byId('timeline-kind').addEventListener('change', () => { timelineLimit = 50; renderTimeline(); });
 byId('timeline-more').addEventListener('click', () => { timelineLimit += 50; renderTimeline(); });
+function renderCommandTimeline() {
+  const entries = commandState.entries;
+  byId('command-tab').textContent = 'Command Timeline' + (entries.length ? ' (' + entries.length + ')' : '');
+  byId('command-summary').textContent = entries.length + ' command event' + (entries.length === 1 ? '' : 's') + ' | oldest to newest | saved history (best effort)';
+  const query = byId('command-filter').value.trim().toLowerCase();
+  const outcome = byId('command-outcome').value;
+  const filtered = entries.filter(item => (!outcome || item.outcome === outcome)
+    && [item.title, item.detail, item.outcome].join(' ').toLowerCase().includes(query));
+  byId('command-empty').textContent = !entries.length ? commandState.empty : !filtered.length ? 'No matching commands' : '';
+  const fragment = document.createDocumentFragment();
+  for (const group of groupTimelineEntries(filtered.slice(0, commandLimit))) {
+    if (group.entries.length === 1) { appendTimelineEntry(fragment, group.entries[0]); continue; }
+    const outcomesInGroup = [...new Set(group.entries.map(item => timelineOutcomeLabel(item.kind, item.outcome)))];
+    const groupView = document.createElement('details'); groupView.className = 'timeline-group'; groupView.dataset.kind = group.kind;
+    const summary = document.createElement('summary');
+    const time = document.createElement('time'); time.className = 'timeline-time'; time.textContent = new Date(group.at).toLocaleString(); time.dateTime = group.at;
+    const label = document.createElement('div'); label.className = 'timeline-kind'; label.textContent = 'Command | ' + outcomesInGroup.join(', ');
+    const title = document.createElement('h3'); title.className = 'timeline-title'; title.textContent = group.entries.length + ' consecutive commands';
+    summary.append(timelineMarker('command', group.entries.some(item => ['failed', 'cancelled'].includes(item.outcome)) ? 'failed'
+      : group.entries.some(item => ['unavailable', 'pending'].includes(item.outcome)) ? 'unavailable' : group.entries[0].outcome), time, label, title);
+    const children = document.createElement('div'); children.className = 'timeline-group-items';
+    for (const item of group.entries) appendTimelineEntry(children, item);
+    groupView.append(summary, children); fragment.append(groupView);
+  }
+  byId('command-list').replaceChildren(fragment); byId('command-more').hidden = filtered.length <= commandLimit;
+}
+byId('command-filter').addEventListener('input', () => { commandLimit = 50; renderCommandTimeline(); });
+byId('command-outcome').addEventListener('change', () => { commandLimit = 50; renderCommandTimeline(); });
+byId('command-more').addEventListener('click', () => { commandLimit += 50; renderCommandTimeline(); });
 let changeState = { entries: [], empty: 'No session selected' };
 let changeLimit = 50;
 let changeSignature = '';
@@ -749,6 +828,14 @@ window.addEventListener('message', event => {
     if (message.sessionId !== timelineState.sessionId) { byId('timeline-filter').value = ''; byId('timeline-kind').value = ''; timelineLimit = 50; }
     timelineState = message; timelineSignature = signature; renderTimeline(); return;
   }
+  if (message.type === 'commandTimeline') {
+    const signature = JSON.stringify(message); if (signature === commandSignature) return;
+    if (message.sessionId !== commandState.sessionId) {
+      byId('command-filter').value = ''; byId('command-outcome').value = ''; byId('command-list').replaceChildren(); commandLimit = 50;
+    }
+    commandState = message; commandSignature = signature; renderCommandTimeline(); return;
+  }
+  if (message.type === 'commandPreview' && message.sessionId === commandState.sessionId) { renderCommandPreview(message); return; }
   if (message.type === 'resources') {
     const signature = JSON.stringify(message); if (signature === resourceSignature) return;
     if (message.sessionId !== resourceState.sessionId) for (const kind of resourceKinds) {

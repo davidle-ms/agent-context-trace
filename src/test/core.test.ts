@@ -10,8 +10,9 @@ import { extractHistory, replayHistory, readHistory, readHistoryChangePreview, l
 import { extractWorkItemActivity, workItemLink, redactWorkItemActivity } from '../work-items';
 import { extractResourceActivity, resourceLink, resourceMetadata, redactResourceActivity } from '../resource-history';
 import { repositoryReadLines, repositoryReadLinesHtml } from '../read-lines';
-import { evidenceTimeline } from '../timeline';
+import { commandTimeline, evidenceTimeline } from '../timeline';
 import { extractChangeActivity } from '../change-history';
+import { extractCommandActivity, extractCommandPreview } from '../command-history';
 
 const input = { sessionId: randomUUID(), filePath: '/workspace/source.ts', startLine: 1, endLine: 3 };
 const event = (startLine = 1, endLine = 10): ReadEvent => ({ id: randomUUID(), rootId: hash('root'), relativePath: 'source.ts',
@@ -33,10 +34,13 @@ test('evidence timeline deduplicates calls and orders saved evidence chronologic
         ],
         resources: [{ callId: 'search-call', toolId: 'search', server: 'ADO', kind: 'search' as const, operation: 'search' as const,
             at: '2026-09-17T02:00:00Z', outcome: 'returned' as const, evidence: 'search-matches' as const, sections: [],
-            query: 'TraceStore', returnedMatches: 3 }]
+            query: 'TraceStore', returnedMatches: 3 }],
+        commands: [{ callId: 'command-call', at: '2026-09-17T01:30:00Z', sequence: 0, summary: 'pwsh command',
+            cwd: 'Workspace', language: 'pwsh', background: false, exitCode: 0, outcome: 'succeeded' as const, commandAvailable: true }]
     };
     const entries = evidenceTimeline(session);
     assert.deepEqual(entries.map(entry => entry.callId), ['work-call', 'search-call', 'local-call']);
+    assert.deepEqual(commandTimeline(session).map(entry => entry.callId), ['command-call']);
     assert.equal(entries[0]?.title, 'get_batch #12, #13');
     assert.equal(entries[1]?.detail, '3 returned matches');
     assert.equal(entries[2]?.title, '2 local files');
@@ -425,6 +429,9 @@ test('failed persistence never updates in-memory read history; corrupt metadata 
 test('chat status distinguishes unsaved read evidence from unmapped entries and updates to a live count', () => {
     const session = extractHistory({ sessionId: 'status-test', requests: [] }, []);
     assert.match(historyStatus(session), /no completed supported file reads saved yet/);
+    const commandSession = extractHistory({ sessionId: 'command-status', requests: [{ response: [{ kind: 'toolInvocationSerialized',
+        toolId: 'run_in_terminal', toolCallId: 'command', isComplete: true }] }] }, []);
+    assert.match(historyStatus(commandSession), /terminal commands are available in Command Timeline/);
     session.recognizedCalls = 2;
     assert.match(historyStatus(session), /2 read entries found, but none map/);
     session.events = [{ id: 'read-1', rootId: hash('root'), relativePath: 'source.ts' }];
@@ -598,4 +605,28 @@ test('change ledger loads metadata first and reconstructs saved text only on exp
         await fs.writeFile(path.join(editingFolder, 'state.json'), '{invalid');
         assert.deepEqual((await readHistory(chatFile, roots)).changes, [], 'Malformed private state does not break chat loading');
     } finally { await fs.rm(temporary, { recursive: true, force: true }); }
+});
+
+test('command history deduplicates terminal updates and withholds command and output bodies', () => {
+    const root = { id: 'root', name: 'Workspace', directory: path.join(os.tmpdir(), 'command-history-root') };
+    const call = { kind: 'toolInvocationSerialized', toolId: 'run_in_terminal', toolCallId: 'terminal-call', isComplete: true,
+        isConfirmed: { type: 1 }, invocationMessage: { value: 'Run focused tests' }, toolSpecificData: {
+            commandLine: { original: 'npm test PRIVATE_COMMAND', forDisplay: 'npm test PRIVATE_COMMAND', isSandboxWrapped: false },
+            cwd: { scheme: 'file', fsPath: path.join(root.directory, 'src') }, language: 'pwsh', isBackground: false,
+            terminalCommandState: { exitCode: 0, timestamp: 2000, duration: 125 },
+            terminalCommandOutput: { text: 'PRIVATE_OUTPUT', lineCount: 1 }
+        } };
+    const snapshot = { requests: [{ timestamp: 1000, response: [{ ...call, toolSpecificData: {
+        ...call.toolSpecificData, terminalCommandState: undefined, terminalCommandOutput: undefined
+    } }, call] }] };
+    const activity = extractCommandActivity(snapshot, [root]);
+    assert.equal(activity.length, 1);
+    assert.deepEqual(activity[0], { callId: 'terminal-call', at: '1970-01-01T00:00:02.000Z', sequence: 0,
+        summary: 'pwsh command', cwd: 'Workspace/src', language: 'pwsh', background: false,
+        durationMs: 125, exitCode: 0, outcome: 'succeeded', commandAvailable: true });
+    assert.equal(JSON.stringify(activity).includes('PRIVATE_'), false);
+    assert.deepEqual(extractCommandPreview(snapshot, 'terminal-call'), {
+        callId: 'terminal-call', command: 'npm test PRIVATE_COMMAND', truncated: false
+    });
+    assert.equal(extractCommandPreview(snapshot, 'missing'), undefined);
 });

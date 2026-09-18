@@ -1,7 +1,7 @@
 import type { HistorySession } from './history';
 import type { WorkItemActivity } from './work-items';
 
-export type EvidenceKind = 'local' | 'work-item' | 'repository' | 'wiki' | 'search' | 'logs';
+export type EvidenceKind = 'local' | 'command' | 'work-item' | 'repository' | 'wiki' | 'search' | 'logs';
 
 export interface EvidenceTimelineEntry {
     key: string;
@@ -10,16 +10,30 @@ export interface EvidenceTimelineEntry {
     at?: string;
     title: string;
     detail: string;
-    outcome: WorkItemActivity['outcome'] | 'recorded';
-    tab: 'file-tab' | 'work-tab' | 'repository-tab' | 'wiki-tab' | 'search-tab' | 'logs-tab';
+    outcome: WorkItemActivity['outcome'] | 'recorded' | 'succeeded';
+    tab?: 'file-tab' | 'work-tab' | 'repository-tab' | 'wiki-tab' | 'search-tab' | 'logs-tab';
     targets?: { rootId: string; relativePath: string }[];
+    commandAvailable?: boolean;
+    sequence?: number;
 }
 
 const timestamp = (value: string | undefined): number => {
     const parsed = value ? new Date(value).getTime() : Number.NaN;
     return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
 };
-const kindOrder: EvidenceKind[] = ['local', 'work-item', 'repository', 'wiki', 'search', 'logs'];
+const kindOrder: EvidenceKind[] = ['local', 'command', 'work-item', 'repository', 'wiki', 'search', 'logs'];
+
+export function commandTimeline(session: HistorySession): EvidenceTimelineEntry[] {
+    return (session.commands ?? []).map(command => {
+        const details = [command.cwd ? `Working directory: ${command.cwd}` : undefined, command.language,
+            command.durationMs === undefined ? undefined : `Duration: ${command.durationMs} ms`,
+            command.exitCode === undefined ? undefined : `Exit code: ${command.exitCode}`, command.background ? 'Background process' : undefined];
+        return { key: `command:${command.callId}`, callId: command.callId, kind: 'command' as const, at: command.at,
+            title: command.summary, detail: details.filter(Boolean).join(' | ') || 'Command metadata unavailable', outcome: command.outcome,
+            commandAvailable: command.commandAvailable, sequence: command.sequence };
+    }).sort((left, right) => timestamp(left.at) - timestamp(right.at) || left.sequence - right.sequence
+        || left.callId.localeCompare(right.callId));
+}
 
 export function evidenceTimeline(session: HistorySession): EvidenceTimelineEntry[] {
     const entries: EvidenceTimelineEntry[] = [];
@@ -64,5 +78,6 @@ export function evidenceTimeline(session: HistorySession): EvidenceTimelineEntry
             title, detail, outcome: resource.outcome, tab: `${resource.kind}-tab` as EvidenceTimelineEntry['tab'] });
     }
     return entries.sort((left, right) => timestamp(left.at) - timestamp(right.at)
+        || (left.sequence ?? Number.POSITIVE_INFINITY) - (right.sequence ?? Number.POSITIVE_INFINITY)
         || kindOrder.indexOf(left.kind) - kindOrder.indexOf(right.kind) || left.callId.localeCompare(right.callId));
 }

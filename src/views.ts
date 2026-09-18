@@ -1,12 +1,12 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { Root, ReadEvent, Session, summary, TraceStore, resolveFile, hash, MAX_FILE_BYTES, readHighlightRanges, ReadRange, readFrequency, ReadFrequency, isWithin } from './core';
-import { HistoryRead, HistorySession, historyStatus, HistoryEntry, groupHistory, readHistoryChangePreview } from './history';
+import { HistoryRead, HistorySession, historyStatus, HistoryEntry, groupHistory, readHistoryChangePreview, readHistoryCommandPreview } from './history';
 import { heatmapHtml } from './heatmap';
 import { workItemLink } from './work-items';
 import { resourceLink, resourceMetadata } from './resource-history';
 import { repositoryReadLinesHtml } from './read-lines';
-import { evidenceTimeline } from './timeline';
+import { commandTimeline, evidenceTimeline } from './timeline';
 
 const frequencyColors = {
     single: { background: 'readSectionBackground', border: 'readSectionBorder', filename: 'readFileForeground' },
@@ -233,6 +233,20 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
                         vscode.workspace.openTextDocument(result.filePath)).then(document => vscode.window.showTextDocument(document));
                 }
             }
+            else if (value.type === 'showTimelineCommand' && value.sessionId === this.history?.id && typeof value.callId === 'string'
+                && this.historyFile && this.history?.commands?.some(command => command.callId === value.callId && command.commandAvailable)) {
+                const session = this.history;
+                const historyFile = this.historyFile;
+                if (!session || !historyFile) { return; }
+                const sessionId = session.id;
+                void readHistoryCommandPreview(historyFile, value.callId).then(preview => {
+                    if (this.history?.id === sessionId && this.historyFile === historyFile
+                        && this.history.commands?.some(command => command.callId === value.callId && command.commandAvailable)) {
+                        void view.webview.postMessage({ type: 'commandPreview', sessionId, callId: value.callId,
+                            command: preview?.command, truncated: preview?.truncated ?? false, unavailable: !preview });
+                    }
+                });
+            }
             else if (value.type === 'openWorkItem' && value.sessionId === this.history?.id) {
                 const activity = this.history?.workItems?.find(item => item.callId === value.callId && item.itemId === value.itemId);
                 const link = activity?.itemId ? workItemLink(activity.url, activity.itemId) : undefined;
@@ -316,6 +330,10 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
             entries: session?.coverage === 'copilot-history-read-metadata' ? evidenceTimeline(session) : [],
             empty: !session ? 'No session selected' : session.coverage !== 'copilot-history-read-metadata'
                 ? 'The evidence timeline is available for saved Copilot chats.' : 'No supported evidence saved in this session.' });
+        void this.webview?.webview.postMessage({ type: 'commandTimeline', sessionId: session?.id,
+            entries: session?.coverage === 'copilot-history-read-metadata' ? commandTimeline(session) : [],
+            empty: !session ? 'No session selected' : session.coverage !== 'copilot-history-read-metadata'
+                ? 'The command timeline is available for saved Copilot chats.' : 'No saved terminal commands in this session.' });
         void this.webview?.webview.postMessage({ type: 'changes', sessionId: session?.id,
             entries: session?.coverage === 'copilot-history-read-metadata' ? session.changes ?? [] : [],
             empty: !session ? 'No session selected' : session.coverage !== 'copilot-history-read-metadata'

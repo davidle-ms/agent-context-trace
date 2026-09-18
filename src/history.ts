@@ -6,6 +6,7 @@ import { excluded, isWithin, Root } from './core';
 import { extractWorkItemActivity, WorkItemActivity } from './work-items';
 import { extractResourceActivity, ResourceActivity } from './resource-history';
 import { ChangeActivity, ChangePreview, readChangeActivity, readChangePreview } from './change-history';
+import { CommandActivity, CommandPreview, extractCommandActivity, extractCommandPreview } from './command-history';
 
 export const MAX_HISTORY_BYTES = 32 * 1024 * 1024;
 const MAX_HEADER_BYTES = 256 * 1024;
@@ -33,6 +34,7 @@ export interface HistorySession {
     workItems?: WorkItemActivity[];
     resources?: ResourceActivity[];
     changes?: ChangeActivity[];
+    commands?: CommandActivity[];
 }
 export interface HistoryEntry { file: string; label: string; updatedAt: string; workspace: string; repositoryMatch: boolean }
 
@@ -107,6 +109,7 @@ export function historyStatus(session: HistorySession): string {
     }
     if (session.resources?.length) { return 'No supported local file reads saved. See the Azure DevOps activity tabs for external context.'; }
     if (session.changes?.length) { return 'No supported local file reads saved. Correlated edit activity is available in Changes.'; }
+    if (session.commands?.length) { return 'No supported local file reads saved. Recorded terminal commands are available in Command Timeline.'; }
     return 'Local Copilot history: no completed supported file reads saved yet. Continue the chat or select another session; colors update when history is saved.';
 }
 
@@ -170,7 +173,7 @@ export function extractHistory(snapshot: JsonObject, roots: readonly Root[]): Hi
     }
     const session: HistorySession = { id: `copilot:${snapshot.sessionId}`, label: title(snapshot.customTitle, `Chat ${snapshot.sessionId.slice(0, 8)}`),
         createdAt: date(snapshot.creationDate) ?? '', coverage: 'copilot-history-read-metadata', events: [], recognizedCalls: 0, unmappedCalls: 0,
-        workItems: extractWorkItemActivity(snapshot), resources: extractResourceActivity(snapshot) };
+        workItems: extractWorkItemActivity(snapshot), resources: extractResourceActivity(snapshot), commands: extractCommandActivity(snapshot, roots) };
     const calls = new Map<string, { tool: JsonObject; at?: string }>();
     for (const request of snapshot.requests) {
         if (!object(request) || !Array.isArray(request.response)) { continue; }
@@ -242,6 +245,10 @@ export async function readHistory(file: string, roots: readonly Root[]): Promise
 
 export async function readHistoryChangePreview(file: string, roots: readonly Root[], key: string): Promise<ChangePreview | undefined> {
     return readChangePreview(file, await readHistorySnapshot(file), roots, key);
+}
+
+export async function readHistoryCommandPreview(file: string, callId: string): Promise<CommandPreview | undefined> {
+    return extractCommandPreview(await readHistorySnapshot(file), callId);
 }
 
 export async function listHistory(folders: readonly string[], roots: readonly Root[] = [], currentHistoryFolder?: string): Promise<HistoryEntry[]> {

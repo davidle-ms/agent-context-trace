@@ -101,7 +101,10 @@ export class Runtime {
             if (session.coverage === 'copilot-history-read-metadata') { redactResourceActivity(session, mode.startsWith('Redact')); }
             if (mode.startsWith('Redact')) {
                 session.label = 'Redacted';
-                if (session.coverage === 'copilot-history-read-metadata') { redactWorkItemActivity(session); }
+                if (session.coverage === 'copilot-history-read-metadata') {
+                    redactWorkItemActivity(session);
+                    delete session.commands;
+                }
                 const files = new Map<string, string>();
                 for (const event of session.events) {
                     const key = `${event.rootId}/${event.relativePath}`;
