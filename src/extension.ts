@@ -228,7 +228,7 @@ export class Runtime {
         if (generation !== this.historyGeneration) { return; }
         this.disconnectHistory();
         this.historyFile = file;
-        this.view.showHistory(session);
+        this.view.showHistory(session, file);
         const schedule = () => {
             if (this.historyTimer) { clearTimeout(this.historyTimer); }
             this.historyTimer = setTimeout(() => {
@@ -255,7 +255,7 @@ export class Runtime {
         if (!this.historyFile) { return; }
         const generation = ++this.historyGeneration;
         const session = this.filterHistory(await readHistory(this.historyFile, this.roots));
-        if (generation === this.historyGeneration) { this.view.showHistory(session); this.refresh(); }
+        if (generation === this.historyGeneration) { this.view.showHistory(session, this.historyFile); this.refresh(); }
     }
 
     private async copyReference(): Promise<void> {

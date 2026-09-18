@@ -91,8 +91,8 @@ body {
 * { box-sizing: border-box; }
 #content { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
 #content[hidden], #work-items[hidden], #position[hidden] { display: none; }
-#tabs { display: flex; flex-wrap: wrap; flex-shrink: 0; border-bottom: 1px solid var(--cp-border); gap: 3px 8px; }
-#tabs button { border: 0; border-bottom: 2px solid var(--cp-bg); padding: 4px 0; background: var(--cp-bg); color: var(--cp-text-muted); cursor: pointer; font: inherit; font-size: 11px; }
+#tabs { display: flex; flex-wrap: nowrap; flex-shrink: 0; overflow-x: auto; border-bottom: 1px solid var(--cp-border); gap: 8px; }
+#tabs button { flex: 0 0 auto; border: 0; border-bottom: 2px solid var(--cp-bg); padding: 4px 0; background: var(--cp-bg); color: var(--cp-text-muted); cursor: pointer; font: inherit; font-size: 11px; }
 #tabs button[aria-selected="true"] { border-bottom-color: var(--cp-single-edge); color: var(--cp-text); }
 button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visible { outline: 1px solid var(--cp-border-strong); outline-offset: 2px; }
 #work-items { flex: 1; min-height: 0; overflow: auto; }
@@ -118,6 +118,25 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .resource-filter { width: 100%; padding: 5px 6px; margin: 8px 0; border: 1px solid var(--cp-border); background: var(--cp-surface); color: var(--cp-text); font: inherit; border-radius: 2px; }
 .resource-panel button { margin: 8px 0; border: 1px solid var(--cp-border); border-radius: 2px; padding: 4px 8px; color: var(--cp-text); background: var(--cp-surface); cursor: pointer; }
 .resource-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; background: var(--cp-surface); color: var(--cp-text); padding: 8px; font: 11px/16px Consolas, monospace; }
+.change-panel { flex: 1; min-height: 0; overflow: auto; }
+.change-panel[hidden] { display: none; }
+.change-panel h2 { font-size: 12px; margin: 6px 0; }
+.change-note, .change-summary, .change-empty, .change-preview-note { color: var(--cp-text-muted); font-size: 11px; margin: 8px 0; overflow-wrap: anywhere; }
+.change-controls { display: grid; grid-template-columns: minmax(120px, 1fr) auto auto; gap: 6px; margin: 8px 0; }
+.change-controls input, .change-controls select { min-width: 0; padding: 5px 6px; border: 1px solid var(--cp-border); background: var(--cp-surface); color: var(--cp-text); font: inherit; border-radius: 2px; }
+.change-entry { padding: 10px 0; border-top: 1px solid var(--cp-border); overflow-wrap: anywhere; }
+.change-entry h3 { margin: 0; font-size: 12px; line-height: 16px; }
+.change-entry dl { margin: 6px 0; font-size: 11px; }
+.change-entry dt { color: var(--cp-text-muted); margin-top: 6px; }
+.change-entry dd { margin: 2px 0; white-space: pre-wrap; }
+.change-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.change-actions button, #change-more { margin: 5px 0; border: 1px solid var(--cp-border); border-radius: 2px; padding: 4px 8px; color: var(--cp-text); background: var(--cp-surface); cursor: pointer; }
+.change-preview { margin-top: 8px; }
+.change-hunk { margin-top: 8px; border-left: 2px solid var(--cp-border-strong); padding-left: 8px; }
+.change-hunk h4 { margin: 4px 0; font-size: 11px; }
+.change-hunk pre { max-height: 220px; margin: 4px 0 8px; padding: 7px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--cp-text); font: 11px/16px Consolas, monospace; }
+.change-before { background: var(--vscode-diffEditor-removedTextBackground, var(--cp-surface)); }
+.change-after { background: var(--vscode-diffEditor-insertedTextBackground, var(--cp-surface)); }
 .timeline-panel { flex: 1; min-height: 0; overflow: auto; }
 .timeline-panel[hidden] { display: none; }
 .timeline-panel h2 { font-size: 12px; margin: 6px 0; }
@@ -177,8 +196,9 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
   #filename { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #position { height: 32px; }
 }
+@media (max-width: 440px) { .change-controls { grid-template-columns: 1fr; } }
 </style></head><body>
-<div id="tabs" role="tablist" aria-label="Recorded context"><button id="file-tab" role="tab" aria-selected="true" aria-controls="content">File Heatmap</button><button id="timeline-tab" role="tab" aria-selected="false" aria-controls="timeline-panel" tabindex="-1">Timeline</button><button id="work-tab" role="tab" aria-selected="false" aria-controls="work-items" tabindex="-1">Work Items</button><button id="repository-tab" role="tab" aria-selected="false" aria-controls="repository-panel" tabindex="-1">Repository Files</button><button id="wiki-tab" role="tab" aria-selected="false" aria-controls="wiki-panel" tabindex="-1">Wiki Pages</button><button id="search-tab" role="tab" aria-selected="false" aria-controls="search-panel" tabindex="-1">Code Searches</button><button id="logs-tab" role="tab" aria-selected="false" aria-controls="logs-panel" tabindex="-1">Pipeline Logs</button></div>
+<div id="tabs" role="tablist" aria-label="Recorded context"><button id="file-tab" role="tab" aria-selected="true" aria-controls="content">File Heatmap</button><button id="timeline-tab" role="tab" aria-selected="false" aria-controls="timeline-panel" tabindex="-1">Timeline</button><button id="changes-tab" role="tab" aria-selected="false" aria-controls="changes-panel" tabindex="-1">Changes</button><button id="work-tab" role="tab" aria-selected="false" aria-controls="work-items" tabindex="-1">Work Items</button><button id="repository-tab" role="tab" aria-selected="false" aria-controls="repository-panel" tabindex="-1">Repository Files</button><button id="wiki-tab" role="tab" aria-selected="false" aria-controls="wiki-panel" tabindex="-1">Wiki Pages</button><button id="search-tab" role="tab" aria-selected="false" aria-controls="search-panel" tabindex="-1">Code Searches</button><button id="logs-tab" role="tab" aria-selected="false" aria-controls="logs-panel" tabindex="-1">Pipeline Logs</button></div>
 <div id="content" role="tabpanel" aria-labelledby="file-tab">
 <div id="status"></div><h2 id="filename">No file open</h2>
 <div id="scale" aria-label="Recorded reads"><span class="single"><i></i>1</span><span class="repeat"><i></i>2-3</span><span class="frequent"><i></i>4-7</span><span class="intense"><i></i>8+</span></div>
@@ -191,11 +211,20 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 <div id="position" aria-live="polite"></div>
 <section id="timeline-panel" class="timeline-panel" role="tabpanel" aria-labelledby="timeline-tab" hidden>
 <h2>Agent Evidence Timeline</h2>
-<div class="timeline-note">Recorded evidence only. Saved history does not currently provide verified edit or terminal-command provenance.</div>
+<div class="timeline-note">Recorded evidence only. Correlated saved edits appear in the Change Ledger; terminal-command provenance remains unavailable.</div>
 <div id="timeline-summary" class="timeline-summary"></div>
 <div class="timeline-controls"><input id="timeline-filter" type="search" aria-label="Filter evidence timeline" placeholder="Filter path, query, ID or outcome">
 <select id="timeline-kind" aria-label="Filter evidence type"><option value="">All evidence</option><option value="local">Local files</option><option value="work-item">Work items</option><option value="repository">Repository files</option><option value="wiki">Wiki pages</option><option value="search">Code searches</option><option value="logs">Pipeline logs</option></select></div>
 <div id="timeline-empty" class="timeline-empty"></div><div id="timeline-list" class="timeline-list"></div><button id="timeline-more" hidden>Show more</button>
+</section>
+<section id="changes-panel" class="change-panel" role="tabpanel" aria-labelledby="changes-tab" hidden>
+<h2>Change Ledger</h2>
+<div class="change-note">Only edits correlated to this saved chat-editing session. Diff text is loaded locally on request.</div>
+<div id="change-summary" class="change-summary"></div>
+<div class="change-controls"><input id="change-filter" type="search" aria-label="Filter changed files" placeholder="Filter file or request ID">
+<select id="change-status" aria-label="Filter change status"><option value="">All statuses</option><option value="recorded">Recorded</option></select>
+<select id="change-attribution" aria-label="Filter change attribution"><option value="">All attribution</option><option value="chat-edit-session">AI-confirmed</option></select></div>
+<div id="change-empty" class="change-empty"></div><div id="change-list"></div><button id="change-more" hidden>Show more</button>
 </section>
 <section id="work-items" role="tabpanel" aria-labelledby="work-tab" hidden>
 <h2 id="work-heading">Azure DevOps / Work Items</h2>
@@ -226,7 +255,7 @@ const context = canvas.getContext('2d');
 let workState = { entries: [], empty: 'No session selected' };
 let workLimit = 50;
 let workSignature = '';
-const tabs = [['file-tab', 'content'], ['timeline-tab', 'timeline-panel'], ['work-tab', 'work-items'], ['repository-tab', 'repository-panel'], ['wiki-tab', 'wiki-panel'], ['search-tab', 'search-panel'], ['logs-tab', 'logs-panel']];
+const tabs = [['file-tab', 'content'], ['timeline-tab', 'timeline-panel'], ['changes-tab', 'changes-panel'], ['work-tab', 'work-items'], ['repository-tab', 'repository-panel'], ['wiki-tab', 'wiki-panel'], ['search-tab', 'search-panel'], ['logs-tab', 'logs-panel']];
 function chooseTab(tabId) {
   byId('position').hidden = tabId !== 'file-tab';
   for (const [id, panel] of tabs) {
@@ -333,6 +362,86 @@ function renderTimeline() {
 byId('timeline-filter').addEventListener('input', () => { timelineLimit = 50; renderTimeline(); });
 byId('timeline-kind').addEventListener('change', () => { timelineLimit = 50; renderTimeline(); });
 byId('timeline-more').addEventListener('click', () => { timelineLimit += 50; renderTimeline(); });
+let changeState = { entries: [], empty: 'No session selected' };
+let changeLimit = 50;
+let changeSignature = '';
+function changeRange(hunk) {
+  return 'L' + hunk.startLine + ':' + hunk.startColumn + '-L' + hunk.endLine + ':' + hunk.endColumn;
+}
+function renderChanges() {
+  const entries = changeState.entries;
+  const files = new Set(entries.map(item => item.rootId + '/' + item.relativePath)).size;
+  const hunks = entries.reduce((count, item) => count + item.hunks.length, 0);
+  byId('changes-tab').textContent = 'Changes' + (entries.length ? ' (' + entries.length + ')' : '');
+  byId('change-summary').textContent = entries.length + ' recorded operation' + (entries.length === 1 ? '' : 's') + ' | '
+    + files + ' file' + (files === 1 ? '' : 's') + ' | ' + hunks + ' hunk' + (hunks === 1 ? '' : 's') + ' | saved history (best effort)';
+  const query = byId('change-filter').value.trim().toLowerCase();
+  const status = byId('change-status').value;
+  const attribution = byId('change-attribution').value;
+  const filtered = entries.filter(item => (!status || status === 'recorded') && (!attribution || item.attribution === attribution)
+    && [item.rootId, item.relativePath, item.requestId, item.epoch].join(' ').toLowerCase().includes(query));
+  byId('change-empty').textContent = !entries.length ? changeState.empty : !filtered.length ? 'No matching changes' : '';
+  const fragment = document.createDocumentFragment();
+  for (const item of filtered.slice(0, changeLimit)) {
+    const entry = document.createElement('article'); entry.className = 'change-entry'; entry.dataset.key = item.key;
+    const heading = document.createElement('h3'); heading.textContent = item.relativePath;
+    const outcome = document.createElement('span'); outcome.className = 'work-outcome';
+    outcome.textContent = 'Recorded | AI-confirmed by correlated chat-editing session';
+    const metadata = document.createElement('dl');
+    const field = (name, value) => {
+      const term = document.createElement('dt'); term.textContent = name;
+      const detail = document.createElement('dd'); detail.textContent = value; metadata.append(term, detail);
+    };
+    field('Workspace root', item.rootId);
+    field('Request time', item.at ? new Date(item.at).toLocaleString() : 'Unavailable');
+    field('Request ID / epoch', item.requestId + ' / ' + item.epoch);
+    field('Changed ranges', item.hunks.map(hunk => changeRange(hunk) + ' | +' + hunk.addedLines + ' / -' + hunk.removedLines + ' lines').join('\\n'));
+    field('Attribution', 'AI-confirmed: operation belongs to the saved editing session and maps to this chat request.');
+    const actions = document.createElement('div'); actions.className = 'change-actions';
+    const open = document.createElement('button'); open.textContent = 'Open current file';
+    open.addEventListener('click', () => {
+      chooseTab('file-tab');
+      api.postMessage({ type: 'openChangeFile', sessionId: changeState.sessionId, key: item.key });
+    });
+    const show = document.createElement('button'); show.className = 'change-show'; show.textContent = 'Show saved diff';
+    show.title = 'Load the saved baseline and edit text locally; it may contain sensitive content.';
+    const note = document.createElement('div'); note.className = 'change-preview-note';
+    const preview = document.createElement('div'); preview.className = 'change-preview'; preview.hidden = true;
+    show.addEventListener('click', () => {
+      if (!preview.hidden) { preview.hidden = true; preview.replaceChildren(); note.textContent = ''; show.textContent = 'Show saved diff'; return; }
+      note.textContent = 'Loading saved diff locally...';
+      api.postMessage({ type: 'showChangePreview', sessionId: changeState.sessionId, key: item.key });
+    });
+    actions.append(open, show); entry.append(heading, outcome, metadata, actions, note, preview); fragment.append(entry);
+  }
+  byId('change-list').replaceChildren(fragment); byId('change-more').hidden = filtered.length <= changeLimit;
+}
+function renderChangePreview(message) {
+  const entry = [...byId('change-list').children].find(element => element.dataset.key === message.key);
+  if (!entry) return;
+  const note = entry.querySelector('.change-preview-note');
+  const preview = entry.querySelector('.change-preview');
+  const button = entry.querySelector('.change-show');
+  preview.replaceChildren();
+  if (message.unavailable || !message.hunks?.length) {
+    note.textContent = 'Saved baseline unavailable or the recorded ranges could not be reconstructed.'; return;
+  }
+  let truncated = false;
+  for (const hunk of message.hunks) {
+    const block = document.createElement('section'); block.className = 'change-hunk';
+    const beforeLabel = document.createElement('h4'); beforeLabel.textContent = 'Before ' + changeRange(hunk);
+    const before = document.createElement('pre'); before.className = 'change-before'; before.textContent = hunk.removedText || '(empty)'; before.tabIndex = 0;
+    const afterLabel = document.createElement('h4'); afterLabel.textContent = 'After';
+    const after = document.createElement('pre'); after.className = 'change-after'; after.textContent = hunk.addedText || '(empty)'; after.tabIndex = 0;
+    block.append(beforeLabel, before, afterLabel, after); preview.append(block); truncated ||= hunk.previewTruncated;
+  }
+  note.textContent = truncated ? 'Saved diff shown; one or more hunk bodies are truncated at the local preview limit.' : 'Saved diff reconstructed from the editing-session baseline.';
+  preview.hidden = false; button.textContent = 'Hide saved diff';
+}
+byId('change-filter').addEventListener('input', () => { changeLimit = 50; renderChanges(); });
+byId('change-status').addEventListener('change', () => { changeLimit = 50; renderChanges(); });
+byId('change-attribution').addEventListener('change', () => { changeLimit = 50; renderChanges(); });
+byId('change-more').addEventListener('click', () => { changeLimit += 50; renderChanges(); });
 function renderWorkItems() {
   const entries = workState.entries;
   const calls = new Set(entries.map(item => item.callId)).size;
@@ -626,6 +735,15 @@ canvas.addEventListener('keydown', event => {
 });
 window.addEventListener('message', event => {
   const message = event.data;
+  if (message.type === 'changes') {
+    const signature = JSON.stringify(message); if (signature === changeSignature) return;
+    if (message.sessionId !== changeState.sessionId) {
+      byId('change-filter').value = ''; byId('change-status').value = ''; byId('change-attribution').value = '';
+      byId('change-list').replaceChildren(); changeLimit = 50;
+    }
+    changeState = message; changeSignature = signature; renderChanges(); return;
+  }
+  if (message.type === 'changePreview' && message.sessionId === changeState.sessionId) { renderChangePreview(message); return; }
   if (message.type === 'timeline') {
     const signature = JSON.stringify(message); if (signature === timelineSignature) return;
     if (message.sessionId !== timelineState.sessionId) { byId('timeline-filter').value = ''; byId('timeline-kind').value = ''; timelineLimit = 50; }

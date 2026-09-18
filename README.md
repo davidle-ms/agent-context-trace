@@ -4,7 +4,7 @@ A VS Code extension that shades filenames in the built-in **Explorer** and recor
 
 ## Preview Status
 
-The preview includes an existing Copilot chat picker, a read-only local-history adapter, built-in Explorer and editor-section decorations, a hover-to-navigate file heatmap, a unified **Timeline**, Azure DevOps **Work Items**, **Repository Files**, **Wiki Pages**, **Code Searches**, and **Pipeline Logs** activity tabs, and a persistent color toggle. Explicit instrumented tracker sessions remain available as an optional fallback. This is not a complete observer of all Copilot activity.
+The preview includes an existing Copilot chat picker, a read-only local-history adapter, built-in Explorer and editor-section decorations, a hover-to-navigate file heatmap, a unified **Timeline**, a saved **Change Ledger**, Azure DevOps **Work Items**, **Repository Files**, **Wiki Pages**, **Code Searches**, and **Pipeline Logs** activity tabs, and a persistent color toggle. Explicit instrumented tracker sessions remain available as an optional fallback. This is not a complete observer of all Copilot activity.
 
 **Existing chat mode** recognizes supported completed/confirmed `copilot_readFile` entries in saved VS Code chat history. It does not require starting a tracker or using `#agentContextRead`. **Tracker mode** records only reads through that contributed tool. Neither mode infers reads from file visibility, search results, terminal commands, or prompt attachments. A colored file means recorded evidence exists at that path, not that the whole file or current revision was read or understood.
 
@@ -75,7 +75,7 @@ The heatmap is at least 320px tall, with 20px of breathing room above and below 
 
 The heatmap reuses the editor's displayed ranges, including revision checks, historical opt-out, dirty-buffer handling, and session isolation. Missing or stale ranges stay uncolored; they are not inferred as whole-file reads. Editing clears stale history colors in both places. The existing eye button also hides the heatmap. No-session, no-file, oversized-file, and unavailable-range states are explicit.
 
-The heatmap receives only relative filenames, line counts, displayed read ranges, and viewport metadata. The Work Items tab receives the derived metadata described below. Repository Files and Wiki Pages can additionally show bounded saved response text on explicit request; it is never executed or rendered as HTML. Nonce-restricted scripts and styles load no network resources, and navigation messages are checked against the current file/session view and line bounds. Switching sessions clears external metadata and previews.
+The heatmap receives only relative filenames, line counts, displayed read ranges, and viewport metadata. The Work Items and Change Ledger tabs initially receive only the derived metadata described below. Repository, wiki, search, log, and change entries can additionally show bounded saved text on explicit request; it is never executed or rendered as HTML. Nonce-restricted scripts and styles load no network resources, and navigation messages are checked against the current file/session view and line bounds. Switching sessions clears external metadata and previews.
 
 ## Agent Evidence Timeline
 
@@ -87,7 +87,15 @@ Filter by evidence type or search path, query, ID, title, and outcome. Local-fil
 
 Timeline payloads are derived metadata only. Repository, wiki, snippet, and log response text remains withheld until explicitly requested in its detail tab. Labels are rendered as text, links and file targets are revalidated against the selected session, and no original tool call is rerun. A timeline event proves only that supported evidence was saved; it does not prove model consumption or understanding.
 
-Saved history does not currently expose a tested, reliable schema for edit or terminal-command provenance in this extension. The timeline says so explicitly and does not infer changes from file state, output text, or nearby reads. Instrumented tracker sessions remain outside the timeline because they do not represent a saved Copilot-chat chronology.
+The timeline does not infer changes from file state, output text, or nearby reads. Correlated saved edits appear separately in the Change Ledger. Saved terminal-command provenance remains unsupported. Instrumented tracker sessions remain outside the timeline because they do not represent a saved Copilot-chat chronology.
+
+## Change Ledger
+
+Choose **Changes** to inspect edit operations stored under the selected chat's same-ID `chatEditingSessions` record. Each metadata row shows the workspace-relative file, request time and ID, editing epoch, changed ranges, approximate added/removed line counts, and **AI-confirmed** attribution. Here, AI-confirmed means the operation belongs to the saved chat-editing session and maps to that chat request; it does not prove the final file was saved, accepted, retained, or unchanged afterward. Ambient document changes and current workspace diffs are never attributed to the AI.
+
+Initial ledger loading reads the bounded editing-state metadata but does not open its saved content blobs or send source text to the webview. Press **Show saved diff** to read the required baseline blobs locally and reconstruct the recorded before/after hunks. Hunk bodies are capped at 8 KiB each, rendered as escaped plain text, and cleared when hidden, filtered out, or when the selected session changes. Missing hashes, malformed private state, unsupported operations, invalid ranges, paths outside the workspace, and excluded paths remain unavailable rather than falling back to current file content.
+
+Filter by file/request ID, recorded status, or attribution. **Open current file** revalidates the path against the current workspace, opens it at the first recorded hunk, and switches to the heatmap. The current file can differ from the saved edit baseline. The private editing-session format is version-dependent and best effort; only `textEdit` operations observed in the tested version are displayed, with bounded state, operation, edit, and snapshot limits.
 
 ## Azure DevOps Work Items
 
@@ -107,7 +115,7 @@ Bounds: history remains limited to 32 MiB; work-item parsing allows up to 5,000 
 
 ## Repository Files and Wiki Pages
 
-After selecting a saved Copilot chat, choose **Repository Files** or **Wiki Pages** in Agent Read Coverage. Both sections work without a local file open, use the existing read-only history watcher, and keep repeated calls separate while deduplicating call IDs. Filter by resource, path, revision, or wiki heading; **Show more** reveals another 50 calls. Tabs wrap in narrow sidebars and support arrow keys, Home, and End. The eye toggle still controls local file colours, not external activity.
+After selecting a saved Copilot chat, choose **Repository Files** or **Wiki Pages** in Agent Read Coverage. Both sections work without a local file open, use the existing read-only history watcher, and keep repeated calls separate while deduplicating call IDs. Filter by resource, path, revision, or wiki heading; **Show more** reveals another 50 calls. Tabs use a single horizontally scrollable row in narrow sidebars and support arrow keys, Home, and End. The eye toggle still controls local file colours, not external activity.
 
 **Repository Files** shows the requested repository, project, requested/returned path, requested branch/tag/commit, returned revision when supplied, explicit source-line range, and count of lines in returned text. The requested branch is not presented as a resolved commit. Response line counts are not source-file ranges, and remote content is not mapped to local amber coverage. Directory listings are not file reads.
 
@@ -139,7 +147,7 @@ The parser accepts the observed JSON array of log lines, plain-text results (inc
 
 **Show returned log text** reveals the bounded saved portion as plain text; **Hide returned log text** clears it from the rendered view. Failed or missing responses expose no preview. The preview can contain sensitive log values and is not scrubbed for secrets. A returned Azure DevOps build-results link is offered only when its `buildId` matches the request; other query parameters and fragments are removed. Filter by build/log ID or project, use **Show more** after 50 calls, and switch sessions to clear old entries and previews. No pipeline is run and no log content is fetched again.
 
-These tabs work without an editor open, refresh with the selected saved chat, and remain visible when file colours are toggled off. Seven tabs support arrow keys and Home/End and wrap in narrow sidebars. All exports omit snippet/log preview text; redacted exports also omit queries, scopes, match metadata, IDs, and other external-resource metadata. Real saved search-result and log-line-array envelopes were validated locally using aggregate-only output, alongside synthetic UI/security/edge-case tests. This does not guarantee compatibility with every MCP server version or prove model consumption.
+These tabs work without an editor open, refresh with the selected saved chat, and remain visible when file colours are toggled off. Eight tabs support arrow keys and Home/End in a single horizontally scrollable row. All exports omit snippet/log/change preview text; redacted exports also omit queries, scopes, match metadata, IDs, and other external-resource metadata. Real saved search-result and log-line-array envelopes were validated locally using aggregate-only output, alongside synthetic UI/security/edge-case tests. This does not guarantee compatibility with every MCP server version or prove model consumption.
 
 ## Optional Instrumented Tracker
 
@@ -165,7 +173,7 @@ Browse and open files in the normal Explorer. Right-click a file there and choos
 
 ## Privacy and Limits
 
-- Existing-chat mode reads local files that can contain prompts and source code in memory, after opt-in. It retains derived file/work-item/resource metadata and bounded optional repository/wiki/snippet/log previews in memory, plus the consent/source-file selection in extension workspace state; it does not duplicate or modify the chat file. Explicit exports contain metadata only. Titles, queries/scopes, paths, IDs, returned text, and timestamps remain sensitive.
+- Existing-chat mode reads local files that can contain prompts and source code in memory, after opt-in. It retains derived file/work-item/resource/change metadata and bounded optional repository/wiki/snippet/log/change previews in memory, plus the consent/source-file selection in extension workspace state; it does not duplicate or modify the chat or editing-session files. Change baseline blobs are opened only after an explicit diff request. Explicit exports contain metadata only. Titles, queries/scopes, paths, IDs, returned text, edit ranges, and timestamps remain sensitive.
 - Historical coverage is best effort and version-dependent. Completed/confirmed tool entries are evidence of recorded activity, not proof of successful model consumption. Copilot's original save/retention behavior determines which entries remain available.
 - Source is returned to Copilot when the read tool is invoked. The extension itself sends no trace telemetry to a separate service.
 - Persisted metadata includes relative paths, tracker labels, timestamps, ranges, document fingerprints, and whether a buffer was unsaved. No source text, prompts, auth tokens, or tool response bodies are saved in the trace.
@@ -183,15 +191,15 @@ Browse and open files in the normal Explorer. Right-click a file there and choos
 |---------|---------|
 | `npm run check-types` | Strict TypeScript validation. |
 | `npm run compile` | Compile tests and bundle the extension. |
-| `npm run test:unit` | Twenty-four tests covering timeline ordering/aggregation, code-search scope/matches/snippets, log IDs/ranges/text, saved UTF-8 attachments, repository read-line mapping, wiki sections, preview limits/redaction, work items, file coverage, history replay, scope, persistence, and attribution. |
-| `npm run test:extension` | The unified timeline and all five Azure DevOps activity tabs, opt-in escaped previews, provenance, filtering/pagination, seven-tab keyboard navigation, session isolation and live history updates; existing heatmap, grouped picker, and restart persistence checks. |
+| `npm run test:unit` | Twenty-six tests covering Change Ledger metadata/privacy/reconstruction, timeline ordering/aggregation, code-search scope/matches/snippets, log IDs/ranges/text, saved UTF-8 attachments, repository read-line mapping, wiki sections, preview limits/redaction, work items, file coverage, history replay, scope, persistence, and attribution. |
+| `npm run test:extension` | The Change Ledger, unified timeline, and all five Azure DevOps activity tabs; opt-in escaped previews, provenance, filtering/pagination, eight-tab keyboard navigation, session isolation, live history updates, existing heatmap, grouped picker, and restart persistence checks. |
 | `npm run package` | Produce a self-contained VSIX without runtime npm installation. |
 
 The host test runner downloads VS Code 1.100.0 by default. To use an installed executable in PowerShell, set `$env:VSCODE_EXECUTABLE_PATH` to the full path of its executable before running the test command. Tests use temporary workspaces/profiles, and screenshots are written to the ignored `.vscode-test/screenshots` directory. TypeScript validation is temporarily disabled in the test profile so placeholder-code diagnostics do not override filename palette checks; normal user settings are untouched. Only the test windows expose local debugging endpoints; the extension does not start a server.
 
 VS Code intentionally uses in-memory workspace/profile storage when `--extensionTestsPath` is present. The persistence regression therefore launches two **normal** isolated development windows and operates the UI through Playwright, rather than expecting test-mode storage to survive another process. See the [VS Code storage implementation](https://github.com/microsoft/vscode/blob/main/src/vs/platform/storage/electron-main/storageMainService.ts).
 
-Tests use synthetic Copilot history fixtures and direct adapter calls. The history parser was also checked read-only against local VS Code 1.138.0 chat data, producing only aggregate read counts during validation. These checks do **not** constitute a signed-in, end-to-end live Copilot conversation test; that remains a manual acceptance gate.
+Tests use synthetic Copilot history and editing-session fixtures plus direct adapter calls. The parsers were also checked read-only against local VS Code chat data, producing only aggregate counts during validation; the real editing-session check found 39 operations and 42 hunks and reconstructed one preview without printing its text. These checks do **not** constitute a signed-in, end-to-end live Copilot conversation test; that remains a manual acceptance gate.
 
 ## Remaining Work
 

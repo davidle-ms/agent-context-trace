@@ -6,11 +6,12 @@ import * as path from 'node:path';
 import { test } from 'node:test';
 import { excluded, hash, isWithin, parseSession, ReadEvent, resolveFile, sliceRead, summary, TraceStore, validateInput, readHighlightRanges, readFrequency } from '../core';
 import { pathToFileURL } from 'node:url';
-import { extractHistory, replayHistory, readHistory, listHistory, historyStatus, groupHistory, HistoryEntry } from '../history';
+import { extractHistory, replayHistory, readHistory, readHistoryChangePreview, listHistory, historyStatus, groupHistory, HistoryEntry } from '../history';
 import { extractWorkItemActivity, workItemLink, redactWorkItemActivity } from '../work-items';
 import { extractResourceActivity, resourceLink, resourceMetadata, redactResourceActivity } from '../resource-history';
 import { repositoryReadLines, repositoryReadLinesHtml } from '../read-lines';
 import { evidenceTimeline } from '../timeline';
+import { extractChangeActivity } from '../change-history';
 
 const input = { sessionId: randomUUID(), filePath: '/workspace/source.ts', startLine: 1, endLine: 3 };
 const event = (startLine = 1, endLine = 10): ReadEvent => ({ id: randomUUID(), rootId: hash('root'), relativePath: 'source.ts',
@@ -538,4 +539,63 @@ test('frequency ranges count distinct reads at inclusive overlaps and merge only
     assert.deepEqual(readHighlightRanges([{ startLine: 1, endLine: 1000000000 }], 'current', 1000000000, true).unverified,
         [{ startLine: 1, endLine: 1000000000, readCount: 1 }], 'Large spans use interval boundaries, not per-line arrays');
     assert.deepEqual([1, 2, 3, 4, 7, 8, 100].map(readFrequency), ['single', 'repeat', 'repeat', 'frequent', 'frequent', 'intense', 'intense']);
+});
+
+test('change ledger reconstructs saved chat edits from baselines without inferring unrelated changes', () => {
+    const root = { id: 'root', name: 'Root', directory: path.join(os.tmpdir(), 'change-ledger-root') };
+    const source = pathToFileURL(path.join(root.directory, 'src', 'sample.ts')).toString();
+    const outside = pathToFileURL(path.join(os.tmpdir(), 'outside.ts')).toString();
+    const state = { initialFileContents: [[source, 'baseline'], [outside, 'outside']], timeline: { operations: [
+        { type: 'textEdit', epoch: 1, requestId: 'request-1', uri: source, edits: [{
+            range: { startLineNumber: 2, startColumn: 7, endLineNumber: 2, endColumn: 10 }, text: 'newValue'
+        }] },
+        { type: 'textEdit', epoch: 2, requestId: 'request-2', uri: outside, edits: [{
+            range: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 }, text: 'ignored'
+        }] }
+    ] } };
+    const changes = extractChangeActivity(state, { requests: [{ requestId: 'request-1', timestamp: '2026-09-18T01:02:03Z' }] }, [root]);
+    assert.equal(changes.length, 1);
+    assert.equal(changes[0]?.relativePath, 'src/sample.ts');
+    assert.equal(changes[0]?.at, '2026-09-18T01:02:03.000Z');
+    assert.equal(changes[0]?.attribution, 'chat-edit-session');
+    assert.deepEqual(changes[0]?.hunks, [{ startLine: 2, startColumn: 7, endLine: 2, endColumn: 10, addedLines: 1, removedLines: 1 }]);
+});
+
+test('change ledger loads metadata first and reconstructs saved text only on explicit preview', async () => {
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'change-ledger-'));
+    try {
+        const workspace = path.join(temporary, 'workspace');
+        const source = path.join(workspace, 'src', 'sample.ts');
+        const storage = path.join(temporary, 'storage');
+        const chatFolder = path.join(storage, 'chatSessions');
+        const editingFolder = path.join(storage, 'chatEditingSessions', 'saved-session');
+        const contents = path.join(editingFolder, 'contents');
+        await fs.mkdir(path.dirname(source), { recursive: true });
+        await fs.mkdir(contents, { recursive: true });
+        const chatFile = path.join(chatFolder, 'saved-session.json');
+        await fs.mkdir(chatFolder, { recursive: true });
+        await fs.writeFile(chatFile, JSON.stringify({ sessionId: 'saved-session', requests: [
+            { requestId: 'request-1', timestamp: '2026-09-18T01:02:03Z', response: [] }
+        ] }));
+        const baselineHash = 'abc1234';
+        const state = { initialFileContents: [[pathToFileURL(source).toString(), baselineHash]], timeline: { operations: [{
+            type: 'textEdit', epoch: 1, requestId: 'request-1', uri: { scheme: 'file', fsPath: source }, edits: [{
+                range: { startLineNumber: 2, startColumn: 7, endLineNumber: 2, endColumn: 17 }, text: 'SECRET_NEW'
+            }]
+        }] } };
+        await fs.writeFile(path.join(editingFolder, 'state.json'), JSON.stringify(state));
+        await fs.writeFile(path.join(contents, baselineHash), 'first\nconst SECRET_OLD = 1;\nlast');
+        const roots = [{ id: 'root', name: 'Root', directory: workspace }];
+        const session = await readHistory(chatFile, roots);
+        assert.equal(session.changes?.length, 1);
+        assert.equal(JSON.stringify(session.changes).includes('SECRET_'), false, 'Initial metadata contains no saved source bodies');
+        const preview = await readHistoryChangePreview(chatFile, roots, session.changes![0]!.key);
+        assert.equal(preview?.hunks[0]?.removedText, 'SECRET_OLD');
+        assert.equal(preview?.hunks[0]?.addedText, 'SECRET_NEW');
+
+        await fs.rm(path.join(contents, baselineHash));
+        assert.equal(await readHistoryChangePreview(chatFile, roots, session.changes![0]!.key), undefined, 'Missing baseline is explicit');
+        await fs.writeFile(path.join(editingFolder, 'state.json'), '{invalid');
+        assert.deepEqual((await readHistory(chatFile, roots)).changes, [], 'Malformed private state does not break chat loading');
+    } finally { await fs.rm(temporary, { recursive: true, force: true }); }
 });

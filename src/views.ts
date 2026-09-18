@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { Root, ReadEvent, Session, summary, TraceStore, resolveFile, hash, MAX_FILE_BYTES, readHighlightRanges, ReadRange, readFrequency, ReadFrequency, isWithin } from './core';
-import { HistoryRead, HistorySession, historyStatus, HistoryEntry, groupHistory } from './history';
+import { HistoryRead, HistorySession, historyStatus, HistoryEntry, groupHistory, readHistoryChangePreview } from './history';
 import { heatmapHtml } from './heatmap';
 import { workItemLink } from './work-items';
 import { resourceLink, resourceMetadata } from './resource-history';
@@ -51,6 +51,7 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
     private readonly disposables: vscode.Disposable[] = [];
     private selectedId: string | undefined;
     private history: HistorySession | undefined;
+    private historyFile: string | undefined;
     private index = new Map<string, (ReadEvent | HistoryRead)[]>();
     private fileUris = new Map<string, vscode.Uri>();
     private readonly recordedSections = new Map<ReadFrequency, vscode.TextEditorDecorationType>();
@@ -115,16 +116,18 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
     selected(): Session | HistorySession | undefined {
         return this.history ? structuredClone(this.history) : this.selectedId ? this.store.get(this.selectedId) : undefined;
     }
-    showHistory(session: HistorySession): void {
+    showHistory(session: HistorySession, historyFile?: string): void {
         this.selectedId = undefined;
         this.history = structuredClone(session);
+        this.historyFile = historyFile;
         this.refresh();
     }
-    clearHistory(): void { this.history = undefined; this.refresh(); }
+    clearHistory(): void { this.history = undefined; this.historyFile = undefined; this.refresh(); }
     async selectSession(id: string | undefined): Promise<void> {
         if (id && !this.store.get(id)) { throw new Error('Tracker session not found.'); }
         await this.context.workspaceState.update('selectedSessionId', id);
         this.history = undefined;
+        this.historyFile = undefined;
         this.selectedId = id;
         this.refresh();
     }
@@ -235,6 +238,31 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
                 const link = activity?.itemId ? workItemLink(activity.url, activity.itemId) : undefined;
                 if (link) { void vscode.env.openExternal(vscode.Uri.parse(link)); }
             }
+            else if ((value.type === 'openChangeFile' || value.type === 'showChangePreview') && value.sessionId === this.history?.id
+                && typeof value.key === 'string') {
+                const activity = this.history?.changes?.find(item => item.key === value.key);
+                const sessionId = this.history?.id;
+                if (!activity || !sessionId) { return; }
+                if (value.type === 'openChangeFile') {
+                    const root = this.roots.find(candidate => candidate.id === activity.rootId);
+                    if (root) {
+                        void resolveFile(path.join(root.directory, activity.relativePath), this.roots).then(result =>
+                            vscode.workspace.openTextDocument(result.filePath)).then(document => vscode.window.showTextDocument(document, {
+                                selection: new vscode.Range(Math.max(0, (activity.hunks[0]?.startLine ?? 1) - 1), 0,
+                                    Math.max(0, (activity.hunks[0]?.startLine ?? 1) - 1), 0)
+                            }));
+                    }
+                } else if (this.historyFile) {
+                    const historyFile = this.historyFile;
+                    void readHistoryChangePreview(historyFile, this.roots, activity.key).then(preview => {
+                        if (this.history?.id === sessionId && this.historyFile === historyFile
+                            && this.history?.changes?.some(item => item.key === activity.key)) {
+                            void view.webview.postMessage({ type: 'changePreview', sessionId, key: activity.key,
+                                hunks: preview?.hunks ?? [], unavailable: !preview });
+                        }
+                    });
+                }
+            }
             else if ((value.type === 'openResource' || value.type === 'showResourceContent' || value.type === 'viewReadLines') && value.sessionId === this.history?.id) {
                 const activity = this.history?.resources?.find(item => item.callId === value.callId && item.kind === value.kind);
                 if (!activity) { return; }
@@ -288,6 +316,11 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
             entries: session?.coverage === 'copilot-history-read-metadata' ? evidenceTimeline(session) : [],
             empty: !session ? 'No session selected' : session.coverage !== 'copilot-history-read-metadata'
                 ? 'The evidence timeline is available for saved Copilot chats.' : 'No supported evidence saved in this session.' });
+        void this.webview?.webview.postMessage({ type: 'changes', sessionId: session?.id,
+            entries: session?.coverage === 'copilot-history-read-metadata' ? session.changes ?? [] : [],
+            empty: !session ? 'No session selected' : session.coverage !== 'copilot-history-read-metadata'
+                ? 'The Change Ledger is available for saved Copilot chats.'
+                : 'No correlated chat-editing operations saved for this session.' });
     }
 
     private heatmapTarget(): vscode.TextEditor | undefined {

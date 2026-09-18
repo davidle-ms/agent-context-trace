@@ -8,7 +8,7 @@ import { chromium } from 'playwright-core';
 import type { Runtime } from '../extension';
 import { TOOL_NAME } from '../core';
 import type { HistorySession } from '../history';
-import { extractHistory } from '../history';
+import { extractHistory, readHistory } from '../history';
 import { historyPickerItems } from '../views';
 
 function workItemCalls() {
@@ -510,6 +510,57 @@ export async function run(): Promise<void> {
         await heatmap.locator('#filename').filter({ hasText: 'source.ts' }).waitFor();
         assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), sourceUri.toString());
         console.log('PASS: evidence timeline ordering, aggregation, text safety, filtering, local opening, and ADO detail navigation');
+        const ledgerStorage = await fs.mkdtemp(path.join(os.tmpdir(), 'act-change-ledger-'));
+        try {
+            const chatFolder = path.join(ledgerStorage, 'chatSessions');
+            const editingFolder = path.join(ledgerStorage, 'chatEditingSessions', 'ledger-ui');
+            const contentsFolder = path.join(editingFolder, 'contents');
+            await fs.mkdir(chatFolder, { recursive: true });
+            await fs.mkdir(contentsFolder, { recursive: true });
+            const chatFile = path.join(chatFolder, 'ledger-ui.json');
+            await fs.writeFile(chatFile, JSON.stringify({ sessionId: 'ledger-ui', customTitle: 'Synthetic Change Ledger', requests: [
+                { requestId: 'ledger-request', timestamp: '2026-09-17T11:00:00Z', response: [] }
+            ] }));
+            await fs.writeFile(path.join(contentsFolder, 'fedcba9'), 'SECRET_OLD <img src=x onerror=alert(1)>\nline two');
+            await fs.writeFile(path.join(editingFolder, 'state.json'), JSON.stringify({
+                initialFileContents: [[sourceUri.toString(), 'fedcba9']], timeline: { operations: [{
+                    type: 'textEdit', epoch: 4, requestId: 'ledger-request', uri: { scheme: 'file', fsPath: filePath }, edits: [{
+                        range: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 11 },
+                        text: 'SECRET_NEW <script>not executable</script>'
+                    }]
+                }] }
+            }));
+            const ledgerSession = await readHistory(chatFile, roots);
+            runtime.view.showHistory(ledgerSession, chatFile);
+            await heatmap.getByRole('tab', { name: /^Changes/ }).click();
+            await heatmap.locator('#change-summary').filter({ hasText: '1 recorded operation | 1 file | 1 hunk' }).waitFor();
+            const ledgerEntry = heatmap.locator('#change-list > .change-entry');
+            assert.equal(await ledgerEntry.count(), 1);
+            assert.match(await ledgerEntry.textContent() ?? '', /AI-confirmed by correlated chat-editing session/);
+            assert.equal((await heatmap.locator('#changes-panel').textContent())?.includes('SECRET_'), false,
+                'Saved source bodies are absent from the initial Change Ledger payload');
+            await heatmap.locator('#change-filter').fill('missing.ts');
+            await heatmap.locator('#change-empty').filter({ hasText: 'No matching changes' }).waitFor();
+            await heatmap.locator('#change-filter').fill('source.ts');
+            await heatmap.locator('#change-status').selectOption('recorded');
+            await heatmap.locator('#change-attribution').selectOption('chat-edit-session');
+            assert.equal(await ledgerEntry.count(), 1);
+            await ledgerEntry.getByRole('button', { name: 'Show saved diff' }).click();
+            await ledgerEntry.locator('.change-before').filter({ hasText: 'SECRET_OLD' }).waitFor();
+            await ledgerEntry.locator('.change-after').filter({ hasText: 'SECRET_NEW' }).waitFor();
+            assert.equal(await ledgerEntry.locator('img, script, input, textarea, [contenteditable="true"]').count(), 0,
+                'Saved diff text is escaped and read-only');
+            await page.screenshot({ path: path.join(process.env.ACT_SCREENSHOTS!, 'change-ledger.png') });
+            await ledgerEntry.getByRole('button', { name: 'Open current file' }).click();
+            await heatmap.locator('#filename').filter({ hasText: 'source.ts' }).waitFor();
+            assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), sourceUri.toString());
+            runtime.view.showHistory({ ...ledgerSession, id: 'copilot:ledger-empty', changes: [] });
+            await heatmap.getByRole('tab', { name: 'Changes', exact: true }).click();
+            await heatmap.locator('#change-empty').filter({ hasText: 'No correlated chat-editing operations' }).waitFor();
+            assert.equal((await heatmap.locator('#changes-panel').textContent())?.includes('SECRET_'), false,
+                'Changing sessions clears revealed diff text');
+            console.log('PASS: Change Ledger metadata privacy, attribution, filters, escaped opt-in diff, navigation, and session isolation');
+        } finally { await fs.rm(ledgerStorage, { recursive: true, force: true }); }
         runtime.view.showHistory(searchLogs);
         await heatmap.getByRole('tab', { name: /^Code Searches/ }).click();
         await heatmap.locator('#search-summary').filter({ hasText: '2 recorded calls' }).waitFor();

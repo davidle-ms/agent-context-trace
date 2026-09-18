@@ -5,6 +5,7 @@ import { parse, ParseError } from 'jsonc-parser';
 import { excluded, isWithin, Root } from './core';
 import { extractWorkItemActivity, WorkItemActivity } from './work-items';
 import { extractResourceActivity, ResourceActivity } from './resource-history';
+import { ChangeActivity, ChangePreview, readChangeActivity, readChangePreview } from './change-history';
 
 export const MAX_HISTORY_BYTES = 32 * 1024 * 1024;
 const MAX_HEADER_BYTES = 256 * 1024;
@@ -31,6 +32,7 @@ export interface HistorySession {
     unmappedCalls: number;
     workItems?: WorkItemActivity[];
     resources?: ResourceActivity[];
+    changes?: ChangeActivity[];
 }
 export interface HistoryEntry { file: string; label: string; updatedAt: string; workspace: string; repositoryMatch: boolean }
 
@@ -104,6 +106,7 @@ export function historyStatus(session: HistorySession): string {
         return 'No supported local file reads saved. Azure DevOps activity is available in Work Items.';
     }
     if (session.resources?.length) { return 'No supported local file reads saved. See the Azure DevOps activity tabs for external context.'; }
+    if (session.changes?.length) { return 'No supported local file reads saved. Correlated edit activity is available in Changes.'; }
     return 'Local Copilot history: no completed supported file reads saved yet. Continue the chat or select another session; colors update when history is saved.';
 }
 
@@ -213,7 +216,7 @@ export function extractHistory(snapshot: JsonObject, roots: readonly Root[]): Hi
     return session;
 }
 
-export async function readHistory(file: string, roots: readonly Root[]): Promise<HistorySession> {
+async function readHistorySnapshot(file: string): Promise<JsonObject> {
     if (!sessionFile.test(path.basename(file))) { throw new Error('Select a JSON or JSONL chat session file.'); }
     const handle = await fs.open(file, 'r');
     try {
@@ -226,8 +229,19 @@ export async function readHistory(file: string, roots: readonly Root[]): Promise
             if (!bytesRead) { break; }
             offset += bytesRead;
         }
-        return extractHistory(replayHistory(buffer.subarray(0, offset).toString('utf8'), file.endsWith('.jsonl')), roots);
+        return replayHistory(buffer.subarray(0, offset).toString('utf8'), file.endsWith('.jsonl'));
     } finally { await handle.close(); }
+}
+
+export async function readHistory(file: string, roots: readonly Root[]): Promise<HistorySession> {
+    const snapshot = await readHistorySnapshot(file);
+    const session = extractHistory(snapshot, roots);
+    session.changes = await readChangeActivity(file, snapshot, roots);
+    return session;
+}
+
+export async function readHistoryChangePreview(file: string, roots: readonly Root[], key: string): Promise<ChangePreview | undefined> {
+    return readChangePreview(file, await readHistorySnapshot(file), roots, key);
 }
 
 export async function listHistory(folders: readonly string[], roots: readonly Root[] = [], currentHistoryFolder?: string): Promise<HistoryEntry[]> {
