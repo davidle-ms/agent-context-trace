@@ -20,6 +20,10 @@ export interface HistoryPickerItem extends vscode.QuickPickItem {
     action: 'select' | 'folder' | 'file' | 'separator';
 }
 
+interface HistoryLapState {
+    baselines: string[][];
+}
+
 export function historyPickerItems(entries: readonly HistoryEntry[]): HistoryPickerItem[] {
     const groups = groupHistory(entries);
     const items: HistoryPickerItem[] = [];
@@ -116,6 +120,43 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
     selected(): Session | HistorySession | undefined {
         return this.history ? structuredClone(this.history) : this.selectedId ? this.store.get(this.selectedId) : undefined;
     }
+    private historyEventKey(event: HistoryRead): string {
+        return JSON.stringify([event.id, event.rootId, event.relativePath]);
+    }
+    private historyLapState(session: HistorySession): HistoryLapState {
+        const state = this.context.workspaceState.get<Record<string, { baselines?: unknown; currentLap?: unknown; baseline?: unknown }>>('historyLapStates')?.[session.id];
+        if (Array.isArray(state?.baselines) && state.baselines.length < 1000
+            && state.baselines.every(baseline => Array.isArray(baseline) && baseline.every(value => typeof value === 'string'))) {
+            return { baselines: state.baselines as string[][] };
+        }
+        if (Number.isSafeInteger(state?.currentLap) && Number(state?.currentLap) > 1 && Number(state?.currentLap) <= 1000
+            && Array.isArray(state?.baseline) && state.baseline.every(value => typeof value === 'string')) {
+            return { baselines: [state.baseline as string[]] };
+        }
+        return { baselines: [] };
+    }
+    async addHistoryLap(): Promise<number> {
+        const session = this.history;
+        if (!session) { throw new Error('Select a Copilot chat or start a tracker session first.'); }
+        const states = this.context.workspaceState.get<Record<string, HistoryLapState>>('historyLapStates', {});
+        const current = this.historyLapState(session);
+        if (current.baselines.length >= 999) { throw new Error('History lap limit reached. Choose another chat session.'); }
+        const next = { baselines: [...current.baselines, [...new Set(session.events.map(event => this.historyEventKey(event)))]] };
+        await this.context.workspaceState.update('historyLapStates', { ...states, [session.id]: next });
+        this.refresh();
+        return next.baselines.length + 1;
+    }
+    async removeHistoryLap(): Promise<number> {
+        const session = this.history;
+        if (!session) { throw new Error('Select a Copilot chat or start a tracker session first.'); }
+        const states = this.context.workspaceState.get<Record<string, HistoryLapState>>('historyLapStates', {});
+        const current = this.historyLapState(session);
+        if (!current.baselines.length) { throw new Error('Lap 1 cannot be removed.'); }
+        const next = { baselines: current.baselines.slice(0, -1) };
+        await this.context.workspaceState.update('historyLapStates', { ...states, [session.id]: next });
+        this.refresh();
+        return next.baselines.length + 1;
+    }
     showHistory(session: HistorySession, historyFile?: string): void {
         this.selectedId = undefined;
         this.history = structuredClone(session);
@@ -152,7 +193,13 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
         const affectedFiles = new Map(this.fileUris);
         this.fileUris.clear();
         this.index.clear();
-        for (const event of session?.events ?? []) {
+        const historyLap = session?.coverage === 'copilot-history-read-metadata' ? this.historyLapState(session) : undefined;
+        const historyBaseline = new Set(historyLap?.baselines.at(-1));
+        const visibleEvents = session?.coverage === 'instrumented-tool-only'
+            ? session.events.filter(event => (event.lap ?? 1) === session.currentLap)
+            : session?.coverage === 'copilot-history-read-metadata'
+                ? session.events.filter(event => !historyBaseline.has(this.historyEventKey(event))) : [];
+        for (const event of visibleEvents) {
             const root = this.roots.find(candidate => candidate.id === event.rootId);
             if (root) {
                 const uri = vscode.Uri.file(path.join(root.directory, event.relativePath));
@@ -164,14 +211,23 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
                 affectedFiles.set(key, uri);
             }
         }
-        if (this.webview) { this.webview.description = `${session?.label ?? 'No session selected'} | Colors ${this.enabled ? 'on' : 'off'}`; }
-        this.statusMessage = session?.coverage === 'copilot-history-read-metadata' ? historyStatus(session) : 'Instrumented reads only';
-        if (session?.coverage === 'copilot-history-read-metadata' && session.events.length
-            && !session.events.some(event => event.startLine !== undefined && event.endLine !== undefined)) {
+        const currentLap = session?.coverage === 'instrumented-tool-only' ? session.currentLap
+            : historyLap ? historyLap.baselines.length + 1 : undefined;
+        if (this.webview) { this.webview.description = `${session?.label ?? 'No session selected'}${currentLap ? ` | Lap ${currentLap}` : ''} | Colors ${this.enabled ? 'on' : 'off'}`; }
+        this.statusMessage = session?.coverage === 'copilot-history-read-metadata'
+            ? currentLap! > 1 && !visibleEvents.length
+                ? `Local Copilot history: Lap ${currentLap} | 0 recorded reads since this lap started (best effort)`
+                : `Lap ${currentLap} | ${historyStatus({ ...session, events: visibleEvents })}`
+            : session ? `Instrumented reads only | Lap ${session.currentLap} | ${visibleEvents.length} recorded read${visibleEvents.length === 1 ? '' : 's'}`
+                : 'Instrumented reads only';
+        if (session?.coverage === 'copilot-history-read-metadata' && visibleEvents.length
+            && !visibleEvents.some(event => event.startLine !== undefined && event.endLine !== undefined)) {
             this.statusMessage += '\nSection highlights unavailable: no line ranges saved.';
         }
-        if (this.webview) { this.webview.badge = { value: this.index.size, tooltip: 'Files with recorded reads in the selected session' }; }
+        if (this.webview) { this.webview.badge = { value: this.index.size,
+            tooltip: currentLap ? `Files with recorded reads in lap ${currentLap}` : 'Files with recorded reads in the selected session' }; }
         void vscode.commands.executeCommand('setContext', 'agentContextTrace.fileColorsEnabled', this.enabled);
+        void vscode.commands.executeCommand('setContext', 'agentContextTrace.canRemoveLap', (currentLap ?? 1) > 1);
         this.decorated.fire([...affectedFiles.values()]);
         this.refreshEditorHighlights();
         this.refreshWorkItems();
@@ -201,7 +257,7 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
             const ranges = this.editorHighlights(editor.document);
             const decorate = (items: ReadRange[], verified: boolean): vscode.DecorationOptions[] => items.map(item => ({
                 range: new vscode.Range(item.startLine - 1, 0, item.endLine - 1, editor.document.lineAt(item.endLine - 1).text.length),
-                hoverMessage: `Lines ${item.startLine}-${item.endLine}: ${item.readCount} recorded read${item.readCount === 1 ? '' : 's'} in this session. `
+                hoverMessage: `Lines ${item.startLine}-${item.endLine}: ${item.readCount} recorded read${item.readCount === 1 ? '' : 's'} in the current lap. `
                     + (verified ? 'Source revision matches this document.' : 'Historical range; file may have changed. Copilot saved no source revision.')
             }));
             for (const [frequency, decoration] of this.recordedSections) {
@@ -392,7 +448,7 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
     provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
         if (!this.enabled || uri.scheme !== 'file' || !this.fileUris.has(this.fileKey(uri))) { return; }
         const count = new Set(this.index.get(this.fileKey(uri))?.map(event => event.id)).size;
-        return { badge: 'R', tooltip: `${count} recorded read${count === 1 ? '' : 's'} in the selected session. `
+        return { badge: 'R', tooltip: `${count} recorded read${count === 1 ? '' : 's'} ${this.history ? 'in the selected session' : 'in the current lap'}. `
             + (this.history ? 'Copilot history (best effort).' : 'Instrumented reads.'),
             color: new vscode.ThemeColor(`agentContextTrace.${frequencyColors[readFrequency(count)].filename}`), propagate: false };
     }
@@ -409,7 +465,8 @@ export class CoverageView implements vscode.WebviewViewProvider, vscode.FileDeco
         const selected = await vscode.window.showQuickPick(events.map(event => ({
             label: event.startLine !== undefined ? `Lines ${event.startLine}-${event.endLine}` : 'Recorded file read (range unavailable)', description: event.at,
             detail: 'snapshotHash' in event ? `Revision ${event.snapshotHash.slice(0, 8)}${event.isDirty ? ' (unsaved buffer)' : ''}` : 'Copilot history; revision unavailable', event
-        })), { title: this.history ? `${name} | ${events.length} historical reads` : `${name} | ${metrics.unique} revision-scoped unique lines | ${metrics.repeated} repeated` });
+        })), { title: this.history ? `${name} | current lap | ${events.length} historical reads`
+            : `${name} | current lap | ${metrics.unique} revision-scoped unique lines | ${metrics.repeated} repeated` });
         if (!selected) { return; }
         const resolved = await resolveFile(target.fsPath, this.roots);
         const document = await vscode.workspace.openTextDocument(vscode.Uri.file(resolved.filePath));

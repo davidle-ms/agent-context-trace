@@ -90,10 +90,14 @@ body {
 }
 * { box-sizing: border-box; }
 #content { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
-#content[hidden], #work-items[hidden], #position[hidden] { display: none; }
+#content[hidden], #azure-panel[hidden], #work-items[hidden], #position[hidden] { display: none; }
 #tabs { display: flex; flex-wrap: nowrap; flex-shrink: 0; overflow-x: auto; border-bottom: 1px solid var(--cp-border); gap: 8px; }
 #tabs button { flex: 0 0 auto; border: 0; border-bottom: 2px solid var(--cp-bg); padding: 4px 0; background: var(--cp-bg); color: var(--cp-text-muted); cursor: pointer; font: inherit; font-size: 11px; }
 #tabs button[aria-selected="true"] { border-bottom-color: var(--cp-single-edge); color: var(--cp-text); }
+#azure-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#azure-tabs { display: flex; flex-wrap: nowrap; flex-shrink: 0; gap: 4px; overflow-x: auto; padding: 2px 0 5px; }
+#azure-tabs button { flex: 0 0 auto; border: 1px solid var(--cp-border); border-radius: 2px; padding: 3px 7px; background: var(--cp-surface); color: var(--cp-text-muted); cursor: pointer; font: inherit; font-size: 10px; }
+#azure-tabs button[aria-selected="true"] { border-color: var(--cp-single-edge); color: var(--cp-text); }
 button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visible { outline: 1px solid var(--cp-border-strong); outline-offset: 2px; }
 #work-items { flex: 1; min-height: 0; overflow: auto; }
 #work-heading { font-size: 12px; margin: 6px 0; }
@@ -201,7 +205,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 }
 @media (max-width: 440px) { .change-controls { grid-template-columns: 1fr; } }
 </style></head><body>
-<div id="tabs" role="tablist" aria-label="Recorded context"><button id="file-tab" role="tab" aria-selected="true" aria-controls="content">File Heatmap</button><button id="timeline-tab" role="tab" aria-selected="false" aria-controls="timeline-panel" tabindex="-1">Timeline</button><button id="command-tab" role="tab" aria-selected="false" aria-controls="command-panel" tabindex="-1">Command Timeline</button><button id="changes-tab" role="tab" aria-selected="false" aria-controls="changes-panel" tabindex="-1">Changes</button><button id="work-tab" role="tab" aria-selected="false" aria-controls="work-items" tabindex="-1">Work Items</button><button id="repository-tab" role="tab" aria-selected="false" aria-controls="repository-panel" tabindex="-1">Repository Files</button><button id="wiki-tab" role="tab" aria-selected="false" aria-controls="wiki-panel" tabindex="-1">Wiki Pages</button><button id="search-tab" role="tab" aria-selected="false" aria-controls="search-panel" tabindex="-1">Code Searches</button><button id="logs-tab" role="tab" aria-selected="false" aria-controls="logs-panel" tabindex="-1">Pipeline Logs</button></div>
+<div id="tabs" role="tablist" aria-label="Recorded context"><button id="file-tab" role="tab" aria-selected="true" aria-controls="content">File Heatmap</button><button id="timeline-tab" role="tab" aria-selected="false" aria-controls="timeline-panel" tabindex="-1">Timeline</button><button id="command-tab" role="tab" aria-selected="false" aria-controls="command-panel" tabindex="-1">Command Timeline</button><button id="changes-tab" role="tab" aria-selected="false" aria-controls="changes-panel" tabindex="-1">Changes</button><button id="azure-tab" role="tab" aria-selected="false" aria-controls="azure-panel" tabindex="-1">Azure DevOps</button></div>
 <div id="content" role="tabpanel" aria-labelledby="file-tab">
 <div id="status"></div><h2 id="filename">No file open</h2>
 <div id="scale" aria-label="Recorded reads"><span class="single"><i></i>1</span><span class="repeat"><i></i>2-3</span><span class="frequent"><i></i>4-7</span><span class="intense"><i></i>8+</span></div>
@@ -237,7 +241,9 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 <select id="change-attribution" aria-label="Filter change attribution"><option value="">All attribution</option><option value="chat-edit-session">AI-confirmed</option></select></div>
 <div id="change-empty" class="change-empty"></div><div id="change-list"></div><button id="change-more" hidden>Show more</button>
 </section>
-<section id="work-items" role="tabpanel" aria-labelledby="work-tab" hidden>
+<section id="azure-panel" role="tabpanel" aria-labelledby="azure-tab" hidden>
+<div id="azure-tabs" role="tablist" aria-label="Azure DevOps evidence"><button id="work-tab" role="tab" aria-selected="true" aria-controls="work-items">Work Items</button><button id="repository-tab" role="tab" aria-selected="false" aria-controls="repository-panel" tabindex="-1">Repository Files</button><button id="wiki-tab" role="tab" aria-selected="false" aria-controls="wiki-panel" tabindex="-1">Wiki Pages</button><button id="search-tab" role="tab" aria-selected="false" aria-controls="search-panel" tabindex="-1">Code Searches</button><button id="logs-tab" role="tab" aria-selected="false" aria-controls="logs-panel" tabindex="-1">Pipeline Logs</button></div>
+<section id="work-items" role="tabpanel" aria-labelledby="work-tab">
 <h2 id="work-heading">Azure DevOps / Work Items</h2>
 <div id="work-summary"></div><input id="work-filter" type="search" aria-label="Filter work-item activity" placeholder="Filter ID, title, project or field">
 <div id="work-empty"></div><div id="work-list"></div><button id="work-more" hidden>Show more</button>
@@ -258,6 +264,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 <h2>Azure DevOps / Pipeline Logs</h2><div id="logs-summary" class="resource-summary"></div>
 <input id="logs-filter" class="resource-filter" type="search" aria-label="Filter pipeline logs" placeholder="Filter build ID, log ID or project">
 <div id="logs-empty" class="resource-empty"></div><div id="logs-list"></div><button id="logs-more" hidden>Show more</button></section>
+</section>
 <script nonce="${nonce}">
 const api = acquireVsCodeApi();
 const byId = id => document.getElementById(id);
@@ -266,7 +273,8 @@ const context = canvas.getContext('2d');
 let workState = { entries: [], empty: 'No session selected' };
 let workLimit = 50;
 let workSignature = '';
-const tabs = [['file-tab', 'content'], ['timeline-tab', 'timeline-panel'], ['command-tab', 'command-panel'], ['changes-tab', 'changes-panel'], ['work-tab', 'work-items'], ['repository-tab', 'repository-panel'], ['wiki-tab', 'wiki-panel'], ['search-tab', 'search-panel'], ['logs-tab', 'logs-panel']];
+const tabs = [['file-tab', 'content'], ['timeline-tab', 'timeline-panel'], ['command-tab', 'command-panel'], ['changes-tab', 'changes-panel'], ['azure-tab', 'azure-panel']];
+const azureTabs = [['work-tab', 'work-items'], ['repository-tab', 'repository-panel'], ['wiki-tab', 'wiki-panel'], ['search-tab', 'search-panel'], ['logs-tab', 'logs-panel']];
 function chooseTab(tabId) {
   byId('position').hidden = tabId !== 'file-tab';
   for (const [id, panel] of tabs) {
@@ -284,6 +292,21 @@ byId('tabs').addEventListener('keydown', event => {
   const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
   chooseTab(tabs[index][0]); byId(tabs[index][0]).focus();
 });
+function chooseAzureTab(tabId) {
+  for (const [id, panel] of azureTabs) {
+    const selected = id === tabId;
+    byId(panel).hidden = !selected;
+    byId(id).setAttribute('aria-selected', String(selected)); byId(id).tabIndex = selected ? 0 : -1;
+  }
+}
+for (const [id] of azureTabs) byId(id).addEventListener('click', () => chooseAzureTab(id));
+byId('azure-tabs').addEventListener('keydown', event => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const current = azureTabs.findIndex(([id]) => byId(id).getAttribute('aria-selected') === 'true');
+  const index = event.key === 'Home' ? 0 : event.key === 'End' ? azureTabs.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + azureTabs.length) % azureTabs.length;
+  chooseAzureTab(azureTabs[index][0]); byId(azureTabs[index][0]).focus();
+});
 const outcomes = { returned: 'Response metadata returned', unavailable: 'Response metadata unavailable', failed: 'Failed call', cancelled: 'Cancelled or denied', pending: 'Incomplete or unconfirmed call', succeeded: 'Succeeded' };
 const timelineKinds = { local: 'Local file', command: 'Command', 'work-item': 'Work item', repository: 'Repository file', wiki: 'Wiki page', search: 'Code search', logs: 'Pipeline log' };
 const timelineIcons = { local: 'F', command: '>', 'work-item': '#', repository: 'R', wiki: 'W', search: 'S', logs: 'L' };
@@ -295,7 +318,7 @@ let commandLimit = 50;
 let commandSignature = '';
 function jumpToTimelineEvidence(item) {
   if (item.kind === 'local') return;
-  chooseTab(item.tab);
+  chooseTab('azure-tab'); chooseAzureTab(item.tab);
   if (item.kind === 'work-item') {
     byId('work-filter').value = ''; workLimit = Math.max(workLimit, workState.entries.length); renderWorkItems();
     const entry = [...byId('work-list').children].find(element => element.dataset.key?.startsWith(item.callId + ':'));

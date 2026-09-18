@@ -5,6 +5,7 @@ import * as path from 'node:path';
 export const TOOL_NAME = 'read_agent_context';
 export const MAX_FILE_BYTES = 1024 * 1024;
 export const MAX_EVENTS = 1000;
+export const MAX_LAPS = 1000;
 export const MAX_SESSIONS = 100;
 export const MAX_SESSION_BYTES = 4 * 1024 * 1024;
 export const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -20,6 +21,7 @@ export interface ReadEvent {
     snapshotHash: string;
     isDirty: boolean;
     at: string;
+    lap?: number;
 }
 export interface Session {
     schemaVersion: 1;
@@ -28,6 +30,7 @@ export interface Session {
     owner: string;
     state: 'recording' | 'paused' | 'stopped';
     generation: number;
+    currentLap: number;
     createdAt: string;
     roots: string[];
     coverage: 'instrumented-tool-only';
@@ -174,6 +177,8 @@ export function parseSession(value: unknown): Session {
         || !Number.isSafeInteger(value.generation) || Number(value.generation) < 0
         || !Array.isArray(value.roots) || !value.roots.length || !value.roots.every(root => typeof root === 'string' && digest.test(root))
         || !Array.isArray(value.events) || value.events.length > MAX_EVENTS) { throw new Error('Unsupported session metadata.'); }
+    const currentLap = value.currentLap === undefined ? 1 : Number(value.currentLap);
+    if (!Number.isSafeInteger(currentLap) || currentLap < 1 || currentLap > MAX_LAPS) { throw new Error('Unsupported session metadata.'); }
     const seen = new Set<string>();
     const events = value.events.map((event: unknown): ReadEvent => {
         if (!object(event) || typeof event.id !== 'string' || !uuid.test(event.id) || seen.has(event.id)
@@ -186,14 +191,18 @@ export function parseSession(value: unknown): Session {
             || !Number.isSafeInteger(event.requestedEndLine) || Number(event.requestedEndLine) < Number(event.endLine)
             || Number(event.requestedEndLine) - Number(event.startLine) >= 500
             || typeof event.snapshotHash !== 'string' || !digest.test(event.snapshotHash)
-            || typeof event.isDirty !== 'boolean' || !date(event.at)) { throw new Error('Invalid read metadata.'); }
+            || typeof event.isDirty !== 'boolean' || !date(event.at)
+            || (event.lap !== undefined && (!Number.isSafeInteger(event.lap) || Number(event.lap) < 1 || Number(event.lap) > currentLap))) {
+            throw new Error('Invalid read metadata.');
+        }
         seen.add(event.id);
         return { id: event.id, rootId: event.rootId, relativePath: event.relativePath, startLine: Number(event.startLine),
             endLine: Number(event.endLine), requestedEndLine: Number(event.requestedEndLine), snapshotHash: event.snapshotHash,
-            isDirty: event.isDirty, at: event.at };
+            isDirty: event.isDirty, at: event.at, lap: event.lap === undefined ? 1 : Number(event.lap) };
     });
     return { schemaVersion: 1, id: value.id, owner: value.owner, label: value.label, createdAt: value.createdAt,
-        roots: value.roots, state: value.state as Session['state'], generation: Number(value.generation), coverage: 'instrumented-tool-only', events };
+        roots: value.roots, state: value.state as Session['state'], generation: Number(value.generation), currentLap,
+        coverage: 'instrumented-tool-only', events };
 }
 
 export class TraceStore {
@@ -252,7 +261,7 @@ export class TraceStore {
                 throw new Error('History is full. Delete a stopped session first.');
             }
             const session: Session = { schemaVersion: 1, id: randomUUID(), owner: this.owner, label: cleanLabel, state: 'recording',
-                generation: 0, roots, coverage: 'instrumented-tool-only', createdAt: new Date().toISOString(), events: [] };
+                generation: 0, currentLap: 1, roots, coverage: 'instrumented-tool-only', createdAt: new Date().toISOString(), events: [] };
             await this.save(session);
             return structuredClone(session);
         });
@@ -277,12 +286,43 @@ export class TraceStore {
         });
     }
 
+    addLap(id: string): Promise<number> {
+        return this.enqueue(async () => {
+            const session = this.get(id);
+            if (!session || session.owner !== this.owner || session.state === 'stopped') {
+                throw new Error('Only the active tracker session can add a lap.');
+            }
+            if (session.currentLap >= MAX_LAPS) { throw new Error('Tracker lap limit reached. Start a new session.'); }
+            session.currentLap++;
+            session.generation++;
+            await this.save(session);
+            return session.currentLap;
+        });
+    }
+
+    removeLap(id: string): Promise<number> {
+        return this.enqueue(async () => {
+            const session = this.get(id);
+            if (!session || session.owner !== this.owner || session.state === 'stopped') {
+                throw new Error('Only the active tracker session can remove a lap.');
+            }
+            if (session.currentLap === 1) { throw new Error('Lap 1 cannot be removed.'); }
+            for (const event of session.events) {
+                if ((event.lap ?? 1) === session.currentLap) { event.lap = session.currentLap - 1; }
+            }
+            session.currentLap--;
+            session.generation++;
+            await this.save(session);
+            return session.currentLap;
+        });
+    }
+
     record(id: string, generation: number, event: ReadEvent, cancelled: () => boolean): Promise<void> {
         return this.enqueue(async () => {
             if (cancelled()) { throw new Error('Read cancelled.'); }
             const session = this.requireRecording(id, generation);
             if (session.events.length >= MAX_EVENTS) { throw new Error('Session event limit reached. Start a new session.'); }
-            session.events.push(event);
+            session.events.push({ ...event, lap: session.currentLap });
             await this.save(session);
         });
     }

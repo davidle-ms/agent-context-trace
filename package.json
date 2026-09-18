@@ -56,6 +56,17 @@
         "title": "Agent Context Trace: Pause / Resume Session"
       },
       {
+        "command": "agentContextTrace.lap",
+        "title": "Agent Context Trace: Add Lap",
+        "icon": "$(add)"
+      },
+      {
+        "command": "agentContextTrace.removeLap",
+        "title": "Agent Context Trace: Remove Lap",
+        "icon": "$(remove)",
+        "enablement": "agentContextTrace.canRemoveLap"
+      },
+      {
         "command": "agentContextTrace.stop",
         "title": "Agent Context Trace: Stop Session",
         "icon": "$(debug-stop)"
@@ -106,14 +117,24 @@
           "group": "navigation@2"
         },
         {
-          "command": "agentContextTrace.toggleFileColors",
+          "command": "agentContextTrace.lap",
           "when": "view == agentContextTrace.readCoverage",
           "group": "navigation@3"
         },
         {
-          "command": "agentContextTrace.refresh",
+          "command": "agentContextTrace.removeLap",
           "when": "view == agentContextTrace.readCoverage",
           "group": "navigation@4"
+        },
+        {
+          "command": "agentContextTrace.toggleFileColors",
+          "when": "view == agentContextTrace.readCoverage",
+          "group": "navigation@5"
+        },
+        {
+          "command": "agentContextTrace.refresh",
+          "when": "view == agentContextTrace.readCoverage",
+          "group": "navigation@6"
         }
       ],
       "explorer/context": [

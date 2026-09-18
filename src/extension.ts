@@ -85,6 +85,30 @@ export class Runtime {
             if (!current) { throw new Error('No tracker session is active in this window.'); }
             await this.store.setState(current.id, current.state === 'paused' ? 'recording' : 'paused');
         });
+        register('lap', async () => {
+            const selected = this.view.selected();
+            if (selected?.coverage === 'copilot-history-read-metadata') {
+                const lap = await this.view.addHistoryLap();
+                void vscode.window.showInformationMessage(`Added history lap ${lap}.`);
+                return;
+            }
+            const current = this.store.current();
+            if (!current || selected?.id !== current.id) { throw new Error('Select the active tracker session, choose a Copilot chat, or start a tracker session first.'); }
+            const lap = await this.store.addLap(current.id);
+            void vscode.window.showInformationMessage(`Added tracker lap ${lap}.`);
+        });
+        register('removeLap', async () => {
+            const selected = this.view.selected();
+            if (selected?.coverage === 'copilot-history-read-metadata') {
+                const lap = await this.view.removeHistoryLap();
+                void vscode.window.showInformationMessage(`Removed the latest history lap. Lap ${lap} is now active.`);
+                return;
+            }
+            const current = this.store.current();
+            if (!current || selected?.id !== current.id) { throw new Error('Select the active tracker session, choose a Copilot chat, or start a tracker session first.'); }
+            const lap = await this.store.removeLap(current.id);
+            void vscode.window.showInformationMessage(`Removed the latest tracker lap. Lap ${lap} is now active.`);
+        });
         register('stop', async () => {
             const current = this.store.current();
             if (current) { await this.store.setState(current.id, 'stopped'); }
@@ -271,7 +295,7 @@ export class Runtime {
     private refresh(): void {
         this.view.refresh();
         const current = this.store.current();
-        this.status.text = current ? `$(record) Trace: ${current.state} | ${current.label}`
+        this.status.text = current ? `$(record) Trace: ${current.state} | Lap ${current.currentLap} | ${current.label}`
             : this.view.selected()?.coverage === 'copilot-history-read-metadata' ? '$(history) Trace: Copilot history' : '$(eye) Trace: choose chat';
         this.status.show();
     }
