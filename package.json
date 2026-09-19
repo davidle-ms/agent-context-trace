@@ -67,6 +67,12 @@
         "enablement": "agentContextTrace.canRemoveLap"
       },
       {
+        "command": "agentContextTrace.chooseLap",
+        "title": "Agent Context Trace: View Lap",
+        "icon": "$(list-ordered)",
+        "enablement": "agentContextTrace.canViewLap"
+      },
+      {
         "command": "agentContextTrace.stop",
         "title": "Agent Context Trace: Stop Session",
         "icon": "$(debug-stop)"

@@ -90,7 +90,7 @@ body {
 }
 * { box-sizing: border-box; }
 #content { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
-#content[hidden], #azure-panel[hidden], #work-items[hidden], #position[hidden] { display: none; }
+#content[hidden], #azure-panel[hidden], #work-items[hidden], #file-footer[hidden] { display: none; }
 #tabs { display: flex; flex-wrap: nowrap; flex-shrink: 0; overflow-x: auto; border-bottom: 1px solid var(--cp-border); gap: 8px; }
 #tabs button { flex: 0 0 auto; border: 0; border-bottom: 2px solid var(--cp-bg); padding: 4px 0; background: var(--cp-bg); color: var(--cp-text-muted); cursor: pointer; font: inherit; font-size: 11px; }
 #tabs button[aria-selected="true"] { border-bottom-color: var(--cp-single-edge); color: var(--cp-text); }
@@ -178,7 +178,9 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .timeline-command-preview { max-height: 220px; margin: 4px 0; padding: 7px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--cp-surface); color: var(--cp-text); font: 11px/16px Consolas, monospace; }
 #status, #empty { color: var(--cp-text-muted); overflow-wrap: anywhere; flex-shrink: 0; }
 #status { font-size: 11px; max-height: 3.6em; overflow: auto; }
-#filename { margin: 0; font-size: 12px; line-height: 16px; overflow-wrap: anywhere; flex-shrink: 0; }
+#file-heading { display: flex; align-items: baseline; gap: 8px; flex-shrink: 0; }
+#filename { flex: 1; min-width: 0; margin: 0; font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+#coverage-count { flex: 0 0 auto; color: var(--cp-text-muted); font-size: 10px; line-height: 16px; white-space: nowrap; }
 #scale { display: flex; flex-wrap: wrap; flex-shrink: 0; gap: 4px 10px; font-size: 11px; color: var(--cp-text-muted); }
 #scale span { display: inline-flex; align-items: center; gap: 4px; }
 #scale i { width: 12px; height: 8px; border-left: 2px solid var(--edge); background: var(--shade); }
@@ -195,19 +197,23 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 #pointer { height: 2px; background: var(--cp-text); box-shadow: 0 0 0 1px var(--cp-surface); transform: translateY(-50%); z-index: 2; }
 #guides { position: absolute; inset: 0; pointer-events: none; }
 .line-label { position: absolute; right: calc(100% + 6px); transform: translateY(-50%); color: var(--cp-text-muted); font: 10px/14px Consolas, monospace; white-space: nowrap; }
-#position { height: 48px; flex-shrink: 0; font-size: 11px; line-height: 16px; white-space: pre-line; overflow: auto; overflow-wrap: anywhere; color: var(--cp-text-muted); }
+#file-footer { height: 48px; display: flex; align-items: flex-end; gap: 8px; flex-shrink: 0; }
+#position { height: 100%; flex: 1; min-width: 0; font-size: 11px; line-height: 16px; white-space: pre-line; overflow: auto; overflow-wrap: anywhere; color: var(--cp-text-muted); }
+#view-lap { border: 0; padding: 3px 0; background: transparent; color: var(--vscode-textLink-foreground); cursor: pointer; font: inherit; font-size: 11px; }
+#view-lap:hover { color: var(--vscode-textLink-activeForeground); }
+#view-lap:disabled { color: var(--vscode-disabledForeground); cursor: default; }
 @media (max-height: 260px) {
   body { padding: 4px 10px; gap: 3px; }
   #content { gap: 3px; }
   #status { height: 14px; line-height: 14px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   #filename { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #position { height: 32px; }
+  #file-footer { height: 32px; }
 }
 @media (max-width: 440px) { .change-controls { grid-template-columns: 1fr; } }
 </style></head><body>
 <div id="tabs" role="tablist" aria-label="Recorded context"><button id="file-tab" role="tab" aria-selected="true" aria-controls="content">File Heatmap</button><button id="timeline-tab" role="tab" aria-selected="false" aria-controls="timeline-panel" tabindex="-1">Timeline</button><button id="command-tab" role="tab" aria-selected="false" aria-controls="command-panel" tabindex="-1">Command Timeline</button><button id="changes-tab" role="tab" aria-selected="false" aria-controls="changes-panel" tabindex="-1">Changes</button><button id="azure-tab" role="tab" aria-selected="false" aria-controls="azure-panel" tabindex="-1">Azure DevOps</button></div>
 <div id="content" role="tabpanel" aria-labelledby="file-tab">
-<div id="status"></div><h2 id="filename">No file open</h2>
+<div id="status"></div><div id="file-heading"><h2 id="filename">No file open</h2><span id="coverage-count" hidden></span></div>
 <div id="scale" aria-label="Recorded reads"><span class="single"><i></i>1</span><span class="repeat"><i></i>2-3</span><span class="frequent"><i></i>4-7</span><span class="intense"><i></i>8+</span></div>
 <div id="empty">No file open</div>
 <div id="map" hidden>
@@ -215,7 +221,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 <div id="guides" aria-hidden="true"></div>
 <div id="viewport"></div><div id="pointer" hidden></div></div>
 </div>
-<div id="position" aria-live="polite"></div>
+<div id="file-footer"><div id="position" aria-live="polite"></div><button id="view-lap" type="button" disabled>View Lap</button></div>
 <section id="timeline-panel" class="timeline-panel" role="tabpanel" aria-labelledby="timeline-tab" hidden>
 <h2>Agent Evidence Timeline</h2>
 <div class="timeline-note">Recorded file and Azure DevOps evidence only. Commands are shown separately in Command Timeline.</div>
@@ -276,7 +282,7 @@ let workSignature = '';
 const tabs = [['file-tab', 'content'], ['timeline-tab', 'timeline-panel'], ['command-tab', 'command-panel'], ['changes-tab', 'changes-panel'], ['azure-tab', 'azure-panel']];
 const azureTabs = [['work-tab', 'work-items'], ['repository-tab', 'repository-panel'], ['wiki-tab', 'wiki-panel'], ['search-tab', 'search-panel'], ['logs-tab', 'logs-panel']];
 function chooseTab(tabId) {
-  byId('position').hidden = tabId !== 'file-tab';
+  byId('file-footer').hidden = tabId !== 'file-tab';
   for (const [id, panel] of tabs) {
     const selected = id === tabId;
     byId(panel).hidden = !selected;
@@ -285,6 +291,7 @@ function chooseTab(tabId) {
   if (tabId === 'file-tab') requestAnimationFrame(draw);
 }
 for (const [id] of tabs) byId(id).addEventListener('click', () => chooseTab(id));
+byId('view-lap').addEventListener('click', () => api.postMessage({ type: 'chooseLap' }));
 byId('tabs').addEventListener('keydown', event => {
   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
   event.preventDefault();
@@ -898,6 +905,17 @@ window.addEventListener('message', event => {
   byId('status').title = state.status;
   byId('filename').textContent = state.filename || 'No file open';
   byId('filename').title = state.filename || '';
+  const coverageCount = byId('coverage-count');
+  const coverageParts = [];
+  if (Number.isInteger(state.fileCount)) coverageParts.push(state.fileCount + (state.fileCount === 1 ? ' file' : ' files'));
+  coverageParts.push('Colors ' + (state.colorsEnabled ? 'on' : 'off'));
+  coverageCount.textContent = coverageParts.join(' · ');
+  coverageCount.title = Number.isInteger(state.fileCount) ? 'Files with recorded reads in the displayed lap; read colors state' : 'Read colors state';
+  coverageCount.hidden = false;
+  const viewLap = byId('view-lap');
+  viewLap.textContent = Number.isInteger(state.displayLap) && Number.isInteger(state.totalLaps)
+    ? 'View Lap ' + state.displayLap + ' of ' + state.totalLaps : 'View Lap';
+  viewLap.disabled = !Number.isInteger(state.totalLaps) || state.totalLaps < 2;
   byId('empty').textContent = state.empty;
   byId('empty').hidden = !state.empty;
   byId('map').hidden = !state.navigable;

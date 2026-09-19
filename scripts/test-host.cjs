@@ -24,14 +24,17 @@ async function verifyPreferenceRestart(executablePath, root, workspace, temporar
                 await page.getByRole('option').filter({ hasText: title }).first().click();
             };
             await page.getByText('Agent Read Coverage', { exact: true }).waitFor();
-            await page.getByText('Agent Read Coverage', { exact: true }).click();
-            const description = page.locator('.pane-header').filter({ hasText: 'Agent Read Coverage' });
-            await description.filter({ hasText: phase === 'set' ? 'Colors on' : 'Colors off' }).waitFor();
+            const header = page.locator('.pane-header').filter({ hasText: 'Agent Read Coverage' }).first();
+            if (await header.getAttribute('aria-expanded') !== 'true') { await header.click(); }
+            const frameName = await page.locator('iframe.webview').getAttribute('name');
+            assert.ok(frameName);
+            const coverage = page.frameLocator(`iframe[name="${frameName}"]`).frameLocator('#active-frame').locator('#coverage-count');
+            await coverage.filter({ hasText: phase === 'set' ? 'Colors on' : 'Colors off' }).waitFor();
             if (phase === 'set') {
                 await command('Agent Context Trace: Toggle Read Colors');
-                await description.filter({ hasText: 'Colors off' }).waitFor();
+                await coverage.filter({ hasText: 'Colors off' }).waitFor();
             }
-            assert.match(await description.textContent(), /Colors off/);
+            assert.match(await coverage.textContent(), /Colors off/);
         } finally { await app.close(); }
     }
     console.log('PASS: file-color preference persisted across two normal VS Code process launches');

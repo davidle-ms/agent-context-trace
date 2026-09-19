@@ -87,10 +87,15 @@ export async function run(): Promise<void> {
     assert.ok(extension.packageJSON.contributes.commands.some((command: { command: string; icon?: string; enablement?: string }) =>
         command.command === 'agentContextTrace.removeLap' && command.icon === '$(remove)'
         && command.enablement === 'agentContextTrace.canRemoveLap'), 'Remove Lap is disabled when only lap 1 exists');
+    assert.ok(extension.packageJSON.contributes.commands.some((command: { command: string; icon?: string; enablement?: string }) =>
+        command.command === 'agentContextTrace.chooseLap' && command.icon === '$(list-ordered)'
+        && command.enablement === 'agentContextTrace.canViewLap'), 'View Lap is enabled when multiple laps exist');
     assert.ok(extension.packageJSON.contributes.menus['view/title'].some((item: { command: string }) => item.command === 'agentContextTrace.lap'),
         'Add Lap is available from the coverage view title');
     assert.ok(extension.packageJSON.contributes.menus['view/title'].some((item: { command: string }) => item.command === 'agentContextTrace.removeLap'),
         'Remove Lap is available from the coverage view title');
+    assert.ok(!extension.packageJSON.contributes.menus['view/title'].some((item: { command: string }) => item.command === 'agentContextTrace.chooseLap'),
+        'View Lap is not beside Add Lap and Remove Lap in the coverage view title');
     if (process.env.ACT_TEST_PHASE === 'restore') {
         const previous = runtime.store.list().find(session => session.label === 'Host test');
         assert.ok(previous, 'Session JSON restored independently of test-mode workspace state');
@@ -102,7 +107,7 @@ export async function run(): Promise<void> {
         assert.equal(runtime.view.provideFileDecoration(sourceUri)?.badge, 'R');
         const restoredDocument = await vscode.workspace.openTextDocument(sourceUri);
         assert.deepEqual(runtime.view.editorHighlights(restoredDocument).verified, [{ startLine: 1, endLine: 1, readCount: 1 }], 'Only the matching saved revision is highlighted after reload');
-        assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /1 recorded read in the current lap/, 'Only the current lap contributes to the restored file total');
+        assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /1 recorded read in the displayed lap/, 'Only the displayed lap contributes to the restored file total');
         const selected = runtime.view.selected()!;
         await runtime.store.delete(selected.id);
         assert.equal(runtime.view.provideFileDecoration(sourceUri), undefined, 'Deletion removes markers');
@@ -140,7 +145,7 @@ export async function run(): Promise<void> {
         assert.equal(runtime.view.selected()?.events[0]?.startLine, undefined, 'Missing historical range is not fabricated');
         assert.deepEqual(runtime.view.editorHighlights(await vscode.workspace.openTextDocument(sourceUri)), { verified: [], unverified: [] }, 'File-only history never highlights the whole file');
         await vscode.commands.executeCommand('agentContextTrace.lap');
-        assert.match(runtime.view.statusMessage, /Lap 2 \| 0 recorded reads since this lap started/);
+        assert.match(runtime.view.statusMessage, /Viewing lap 2 of 2 \| 0 recorded reads/);
         assert.equal(runtime.view.selected()?.events.length, 1, 'Starting a history lap preserves the original saved evidence');
         assert.equal(runtime.view.provideFileDecoration(sourceUri), undefined, 'Starting a history lap clears prior file counts');
         await runtime.view.toggle();
@@ -150,13 +155,21 @@ export async function run(): Promise<void> {
             pastTenseMessage: { value: `Read [file](${neutralUri.toString()})` } }] }) + '\n';
         await fs.appendFile(file, append);
         await updated;
-        assert.match(runtime.view.statusMessage, /Lap 2 \| Local Copilot history: 1 recorded read in this repository/);
+        assert.match(runtime.view.statusMessage, /Viewing lap 2 of 2 \| Local Copilot history: 1 recorded read in this repository/);
         assert.equal(runtime.view.enabled, false, 'History refresh does not turn colors on');
         await runtime.view.toggle();
         assert.equal(runtime.view.provideFileDecoration(neutralUri)?.badge, 'R');
         assert.equal(runtime.view.provideFileDecoration(sourceUri), undefined, 'Reads from the prior history lap stay hidden after refresh');
+        await runtime.view.showLap(1);
+        assert.match(runtime.view.statusMessage, /Viewing lap 1 of 2 \| Local Copilot history: 1 recorded read in this repository/);
+        assert.equal(runtime.view.provideFileDecoration(sourceUri)?.badge, 'R', 'Viewing lap 1 restores only its file reads');
+        assert.equal(runtime.view.provideFileDecoration(neutralUri), undefined, 'Viewing lap 1 hides lap 2 file reads');
+        assert.equal(runtime.view.selected()?.events.length, 2, 'Browsing laps does not modify saved evidence');
+        await runtime.view.showLap(2);
+        assert.equal(runtime.view.provideFileDecoration(sourceUri), undefined);
+        assert.equal(runtime.view.provideFileDecoration(neutralUri)?.badge, 'R', 'Viewing lap 2 restores its file reads');
         await vscode.commands.executeCommand('agentContextTrace.removeLap');
-        assert.match(runtime.view.statusMessage, /Lap 1 \| Local Copilot history: 2 recorded reads in this repository/);
+        assert.match(runtime.view.statusMessage, /Viewing lap 1 of 1 \| Local Copilot history: 2 recorded reads in this repository/);
         assert.equal(runtime.view.provideFileDecoration(sourceUri)?.badge, 'R', 'Removing a history lap restores earlier read counts');
         assert.equal(runtime.view.provideFileDecoration(neutralUri)?.badge, 'R', 'Removing a history lap retains current-lap reads');
         assert.equal(await fs.readFile(file, 'utf8'), initial + firstAppend + append, 'Extension never edits Copilot chat history');
@@ -233,15 +246,20 @@ export async function run(): Promise<void> {
     assert.equal(runtime.store.get(sessionId)?.events.length, 3, 'Starting a lap preserves prior evidence');
     assert.deepEqual(runtime.view.editorHighlights(document), { verified: [], unverified: [] }, 'Starting a lap clears prior section counts');
     assert.equal(runtime.view.provideFileDecoration(sourceUri), undefined, 'Starting a lap clears prior file counts');
-    assert.match(runtime.view.statusMessage, /Lap 2 \| 0 recorded reads/);
+    assert.match(runtime.view.statusMessage, /Viewing lap 2 of 2 \| 0 recorded reads/);
     await invoke({ startLine: 1, endLine: 1 });
     assert.equal(runtime.store.get(sessionId)?.events.at(-1)?.lap, 2);
     assert.deepEqual(runtime.view.editorHighlights(document).verified, [{ startLine: 1, endLine: 1, readCount: 1 }], 'New lap counts restart at one');
-    assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /1 recorded read in the current lap/);
+    assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /1 recorded read in the displayed lap/);
+    await runtime.view.showLap(1);
+    assert.equal(runtime.store.get(sessionId)?.currentLap, 2, 'Browsing an earlier lap does not change the recording lap');
+    assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /3 recorded reads in the displayed lap/);
+    await runtime.view.showLap(2);
+    assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /1 recorded read in the displayed lap/);
     await vscode.commands.executeCommand('agentContextTrace.removeLap');
     assert.equal(runtime.store.get(sessionId)?.currentLap, 1);
     assert.ok(runtime.store.get(sessionId)?.events.every(event => event.lap === 1), 'Removing a tracker lap merges its evidence into the previous lap');
-    assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /4 recorded reads in the current lap/);
+    assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /4 recorded reads in the displayed lap/);
     await vscode.commands.executeCommand('agentContextTrace.lap');
     assert.equal(runtime.store.get(sessionId)?.currentLap, 2);
     await invoke({ startLine: 1, endLine: 1 });
@@ -276,6 +294,29 @@ export async function run(): Promise<void> {
         const heatmap = page.frameLocator(`iframe[name="${coverageFrameName}"]`).frameLocator('#active-frame');
         const canvas = heatmap.locator('#heatmap');
         await canvas.waitFor({ state: 'visible' });
+        await heatmap.locator('#coverage-count').getByText('1 file · Colors on', { exact: true }).waitFor();
+        const viewLap = heatmap.locator('#view-lap');
+        await viewLap.getByText('View Lap 2 of 2', { exact: true }).waitFor();
+        assert.equal(await viewLap.evaluate(button => {
+            const footer = button.parentElement;
+            const content = globalThis.document.getElementById('content');
+            return footer?.id === 'file-footer' && !!content
+                && footer.getBoundingClientRect().top >= content.getBoundingClientRect().bottom;
+        }), true,
+            'View Lap is below the heatmap instead of in the native title toolbar');
+        const coverageHeader = await section.locator('.pane-header').innerText();
+        assert.doesNotMatch(coverageHeader, /Lap \d+ of \d+|Colors (?:on|off)/, 'Lap and color details stay inside the panel, not its native header');
+        await viewLap.click();
+        await page.locator('.quick-input-widget').getByText('Lap 1', { exact: true }).click();
+        await viewLap.getByText('View Lap 1 of 2', { exact: true }).waitFor();
+        assert.equal(runtime.store.get(sessionId)?.currentLap, 2, 'The View Lap picker does not change the recording lap');
+        assert.match(runtime.view.statusMessage, /Viewing lap 1 of 2/);
+        assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /4 recorded reads in the displayed lap/);
+        await viewLap.click();
+        await page.locator('.quick-input-widget').getByText('Lap 2', { exact: true }).click();
+        await viewLap.getByText('View Lap 2 of 2', { exact: true }).waitFor();
+        assert.match(runtime.view.statusMessage, /Viewing lap 2 of 2/);
+        assert.match(runtime.view.provideFileDecoration(sourceUri)!.tooltip!, /1 recorded read in the displayed lap/);
         assert.match(await heatmap.locator('#filename').textContent() ?? '', /repo-one.*source.ts/);
         assert.equal(await canvas.evaluate(() => globalThis.document.documentElement.scrollWidth <= window.innerWidth), true, 'Compact heatmap has no horizontal overflow');
         const verifyHeatmapSpacing = async () => {
@@ -887,7 +928,7 @@ export async function run(): Promise<void> {
         await heatmap.locator('#heatmap[data-marker-hidden-on-leave="true"]').waitFor();
         const fourthLine = page.locator('.monaco-editor .view-lines .view-line').getByText('fourth', { exact: true }).first();
         await fourthLine.hover({ position: { x: 4, y: 6 } });
-        await page.getByText(/Lines 4-4: 8 recorded reads in the current lap/).waitFor();
+        await page.getByText(/Lines 4-4: 8 recorded reads in the displayed lap/).waitFor();
         await page.keyboard.press('Escape');
         const heatmapUri = vscode.Uri.file(path.join(root.directory, 'heatmap-preview.ts'));
         const heatmapSource = Array.from({ length: 240 }, (_, index) => `const value${index + 1} = ${index + 1};`).join('\n');

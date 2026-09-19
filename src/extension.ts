@@ -85,6 +85,7 @@ export class Runtime {
             if (!current) { throw new Error('No tracker session is active in this window.'); }
             await this.store.setState(current.id, current.state === 'paused' ? 'recording' : 'paused');
         });
+        register('chooseLap', () => this.view.chooseLap());
         register('lap', async () => {
             const selected = this.view.selected();
             if (selected?.coverage === 'copilot-history-read-metadata') {
@@ -95,6 +96,7 @@ export class Runtime {
             const current = this.store.current();
             if (!current || selected?.id !== current.id) { throw new Error('Select the active tracker session, choose a Copilot chat, or start a tracker session first.'); }
             const lap = await this.store.addLap(current.id);
+            await this.view.showLap(lap);
             void vscode.window.showInformationMessage(`Added tracker lap ${lap}.`);
         });
         register('removeLap', async () => {
@@ -106,7 +108,9 @@ export class Runtime {
             }
             const current = this.store.current();
             if (!current || selected?.id !== current.id) { throw new Error('Select the active tracker session, choose a Copilot chat, or start a tracker session first.'); }
+            if (!this.view.viewingLatestLap()) { throw new Error('View the newest lap before removing it.'); }
             const lap = await this.store.removeLap(current.id);
+            await this.view.showLap(lap);
             void vscode.window.showInformationMessage(`Removed the latest tracker lap. Lap ${lap} is now active.`);
         });
         register('stop', async () => {
